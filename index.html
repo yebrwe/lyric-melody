@@ -351,7 +351,7 @@
       <input type="file" id="fileMr" accept="audio/*" style="display:none">
       <label class="gridlab">BPM <input type="number" id="bpmIn" min="30" max="300" step="0.01" placeholder="120"></label>
       <label class="gridlab">첫 박 <input type="number" id="offIn" min="0" step="0.01" placeholder="0.00">s</label>
-      <label class="gridlab"><input type="checkbox" id="snapChk" checked> 격자 스냅</label>
+      <label class="gridlab" title="글자를 찍거나 드래그하면 가장 가까운 16비트 칸 경계에 자동으로 딱 붙여줍니다"><input type="checkbox" id="snapChk" checked> 격자 스냅</label>
       <button class="btn" id="playBtn" disabled>▶ 재생</button>
       <span id="timeDisp" class="status" style="margin-left:0">0:00.0 / 0:00.0</span>
       <button class="btn" id="zoomOut">− 축소</button>
@@ -420,13 +420,6 @@
         <button class="btn primary" id="fbLogin" disabled>Google로 로그인</button>
         <button class="btn" id="fbLogout" disabled>로그아웃</button>
       </div>
-      <details class="io">
-        <summary>다른 Firebase 프로젝트 연결 (고급)</summary>
-        <textarea id="fbCfg" rows="4" spellcheck="false" placeholder="firebaseConfig 스니펫이나 JSON을 통째로 붙여넣으세요"></textarea>
-        <div class="iobtns">
-          <button class="btn" id="fbConnect">이 구성으로 연결</button>
-        </div>
-      </details>
     </details>
   </main>
 </div>
@@ -547,6 +540,9 @@
         return l.map(function (c) { return c.ch; }).join('');
       }).join('\n');
     }
+    /* 격자 기본값 (권진아 - 뭔가 잘못됐어 Rock VER. 측정값) */
+    if (!(typeof d.bpm === 'number' && d.bpm > 0)) d.bpm = 123.05;
+    if (typeof d.gridOff !== 'number') d.gridOff = 1.72;
     return d;
   }
 
@@ -1607,7 +1603,7 @@
 
   var FB_CDN = 'https://www.gstatic.com/firebasejs/10.14.1/';
   var fb = { mods: null, auth: null, db: null, stg: null, user: null, timer: null };
-  var cloudStateEl = $('cloudState'), fbCfgTa = $('fbCfg');
+  var cloudStateEl = $('cloudState');
   var gateEl = $('gate'), gateMsg = $('gateMsg'), gateLogin = $('gateLogin'), gateOffline = $('gateOffline');
 
   function gateShow(msg, canLogin, canOffline) {
@@ -1659,25 +1655,6 @@
     });
   }
 
-  /* 콘솔에서 복사한 JS 스니펫(주석·따옴표 없는 키 포함)도 통째로 붙여넣을 수 있게 관대하게 해석 */
-  function parseFbCfg(text) {
-    try { return JSON.parse(text); } catch (e) {}
-    var m = String(text).match(/\{[^{}]*apiKey[\s\S]*?\}/);
-    if (!m) return null;
-    var s = m[0]
-      .replace(/\/\/[^\n]*/g, '')
-      .replace(/,\s*\}/g, '}')
-      .replace(/([{,]\s*)([A-Za-z_$][\w$]*)\s*:/g, '$1"$2":')
-      .replace(/'/g, '"');
-    try { return JSON.parse(s); } catch (e) { return null; }
-  }
-  $('fbConnect').addEventListener('click', function () {
-    var cfg = parseFbCfg(fbCfgTa.value);
-    if (!cfg || !cfg.apiKey || !cfg.projectId) { flash('구성을 해석할 수 없습니다. firebaseConfig 부분을 붙여넣어 주세요.'); return; }
-    try { localStorage.setItem('fb-config', JSON.stringify(cfg)); } catch (e) {}
-    fbCfgTa.value = JSON.stringify(cfg);
-    fbInit(cfg);
-  });
   $('fbLogin').addEventListener('click', function () {
     if (!fb.auth) return;
     fb.mods.au.signInWithPopup(fb.auth, new fb.mods.au.GoogleAuthProvider())
@@ -1781,12 +1758,7 @@
     messagingSenderId: '412073777990',
     appId: '1:412073777990:web:4d3257d2c0a52fd9232347'
   };
-  (function () {
-    var savedCfg = null;
-    try { savedCfg = JSON.parse(localStorage.getItem('fb-config')); } catch (e) {}
-    if (savedCfg) fbCfgTa.value = JSON.stringify(savedCfg);
-    fbInit(savedCfg || FB_DEFAULT_CFG);
-  })();
+  fbInit(FB_DEFAULT_CFG);
 
   /* ---------- 시작 ---------- */
 
