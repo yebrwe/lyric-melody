@@ -17,8 +17,26 @@
 4. **자주 쓰는 패턴** 버튼으로 꺾기 패턴을 한 번에 적용하고, [＋ 현재 패턴 저장]으로 나만의 패턴을 추가
 5. **[인쇄]** 로 악보만 깔끔하게 출력, 하단 JSON으로 내보내기/가져오기
 
-작업 내용은 브라우저(localStorage)에 자동 저장됩니다.
+악보, 사용자 패턴, 원곡/MR은 로그인한 Google 계정별로 Firebase에 자동 저장되며, 브라우저에도 복구용 사본을 보관합니다.
+다른 컴퓨터에서는 반드시 같은 Google 계정으로 로그인해야 같은 작업을 불러옵니다.
 
 ## 실행
 
-빌드 과정이 없는 정적 페이지입니다. `index.html`을 브라우저로 열면 바로 동작합니다.
+운영 주소: [https://lyric-melody.vercel.app/](https://lyric-melody.vercel.app/)
+
+빌드 과정이 없는 정적 페이지입니다. 로컬 개발 시에는 파일을 직접 열지 말고 HTTP 서버로 실행합니다.
+
+```bash
+python3 -m http.server 8000
+```
+
+그런 다음 [http://localhost:8000](http://localhost:8000)으로 접속합니다. `file://`로 `index.html`을 직접 열면 Firebase Google 로그인이 허용되지 않습니다.
+
+## Firebase 보안 규칙
+
+Firestore와 Storage는 로그인한 사용자가 자신의 `users/{uid}` 경로만 읽고 쓸 수 있도록 규칙 파일을 포함합니다.
+Firebase CLI로 규칙을 배포할 때는 다음 명령을 사용합니다.
+
+```bash
+firebase deploy --only firestore:rules,storage
+```

@@ -1,0 +1,41 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isOwner(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
+    function isValidMainDoc() {
+      return request.resource.data.keys().hasOnly([
+          'data', 'mtime', 'revision', 'schemaVersion', 'updatedAt'
+        ])
+        && request.resource.data.data is string
+        && request.resource.data.mtime is int
+        && request.resource.data.revision is int
+        && request.resource.data.revision > 0
+        && request.resource.data.schemaVersion == 2
+        && request.resource.data.updatedAt is timestamp;
+    }
+
+    match /users/{userId}/docs/{docId} {
+      allow read: if isOwner(userId) && docId == 'main';
+
+      allow create: if isOwner(userId)
+        && docId == 'main'
+        && isValidMainDoc()
+        && request.resource.data.revision == 1;
+
+      allow update: if isOwner(userId)
+        && docId == 'main'
+        && isValidMainDoc()
+        && (
+          (!('revision' in resource.data) && request.resource.data.revision == 1)
+          || (
+            resource.data.revision is int
+            && request.resource.data.revision == resource.data.revision + 1
+          )
+        );
+    }
+  }
+}

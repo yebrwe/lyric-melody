@@ -1,0 +1,17 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /users/{userId}/{fileName} {
+      allow read: if request.auth != null
+        && request.auth.uid == userId
+        && fileName.matches('audio-(orig|mr)');
+
+      allow create, update: if request.auth != null
+        && request.auth.uid == userId
+        && fileName.matches('audio-(orig|mr)')
+        && request.resource.size < 200 * 1024 * 1024
+        && request.resource.contentType.matches('audio/.*');
+    }
+  }
+}
