@@ -214,7 +214,19 @@
     height: 216px;
   }
   .tl-inner { position: relative; height: 100%; }
+  #grid { position: absolute; top: 0; left: 0; display: block; }
   #wave { position: absolute; top: 0; left: 0; display: block; }
+  #timeControls { flex-wrap: wrap; }
+  .gridlab {
+    display: flex; align-items: center; gap: 4px;
+    font-size: 11.5px; color: var(--muted); white-space: nowrap;
+  }
+  .gridlab input[type="number"] {
+    width: 66px; font: inherit; font-size: 12px;
+    padding: 3px 6px; border: 1px solid var(--edge); border-radius: 5px;
+    background: var(--paper); color: var(--ink);
+  }
+  .gridlab input[type="number"]:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
   .tl-syls { position: absolute; top: 100px; left: 0; right: 0; bottom: 0; }
   .tl-syl {
     position: absolute; top: 0; height: 100%;
@@ -303,6 +315,9 @@
       <input type="file" id="fileOrig" accept="audio/*" style="display:none">
       <label class="btn" for="fileMr">MR 불러오기</label>
       <input type="file" id="fileMr" accept="audio/*" style="display:none">
+      <label class="gridlab">BPM <input type="number" id="bpmIn" min="30" max="300" step="0.01" placeholder="120"></label>
+      <label class="gridlab">첫 박 <input type="number" id="offIn" min="0" step="0.01" placeholder="0.00">s</label>
+      <label class="gridlab"><input type="checkbox" id="snapChk" checked> 격자 스냅</label>
       <button class="btn" id="playBtn" disabled>▶ 재생</button>
       <span id="timeDisp" class="status" style="margin-left:0">0:00.0 / 0:00.0</span>
       <button class="btn" id="zoomOut">− 축소</button>
@@ -320,6 +335,7 @@
       <div class="tl-wrap">
         <div class="tl-scroll" id="tlScroll">
           <div class="tl-inner" id="tlInner">
+            <canvas id="grid" height="214"></canvas>
             <canvas id="wave" height="96"></canvas>
             <div id="tlSyls" class="tl-syls"></div>
             <div class="playhead" id="playhead"></div>
@@ -334,7 +350,8 @@
         오디오를 불러오고 <b>재생하면서 글자가 불리는 순간 Enter</b>(또는 [다음 글자 찍기])를 누르면 큐의 다음 글자가 그 시각에 배치됩니다 ·
         배치된 글자는 <b>좌우 드래그</b>로 미세 조정 · 글자를 클릭하면 음이 선택되어 <b>↑ ↓</b> 계단 수정(마지막 음에서 연음 추가),
         <b>1~9</b> 바이브레이션, <b>Delete</b> 음 삭제 · <b>Shift+Delete</b> 또는 ✕ = 배치 해제 · 파형 클릭 = 해당 위치로 이동 ·
-        <b>Space</b> 재생/일시정지 · ← → 2초 이동 · 원곡/MR 트랙 버튼으로 각각 소리를 켜고 끌 수 있습니다 ·
+        <b>Space</b> 재생/일시정지 · ← → 2초 이동 · 레인 왼쪽 버튼으로 트랙별 소리 켜고 끄기 ·
+        <b>BPM·첫 박</b>을 입력하면 16비트 격자가 깔리고(진한 선 = 마디, 중간 = 박), <b>격자 스냅</b>이 켜져 있으면 찍기·드래그가 가장 가까운 16비트 칸에 자동으로 붙습니다 ·
         오디오는 이 브라우저에 저장되어 다음에도 자동으로 열립니다
       </p>
     </div>
@@ -419,6 +436,8 @@
       ].join('\n')
     };
     d.lines = linesFrom(d.lyrics);
+    d.bpm = 123.05;   /* 권진아 - 뭔가 잘못됐어 (Rock VER.) 자동 측정값 */
+    d.gridOff = 1.72;
     return d;
   }
 
@@ -1135,6 +1154,55 @@
     ctx.globalAlpha = 1;
   }
 
+  /* ---------- 16비트 격자 ---------- */
+  var bpmIn = $('bpmIn'), offIn = $('offIn'), snapChk = $('snapChk');
+
+  function gridStep() {
+    var bpm = +doc.bpm;
+    return bpm > 0 ? 60 / bpm / 4 : 0;
+  }
+  function snapT(t) {
+    var st = gridStep();
+    if (!st) return t;
+    var off = +doc.gridOff || 0;
+    return Math.max(0, off + Math.round((t - off) / st) * st);
+  }
+  function gridInit() {
+    bpmIn.value = (typeof doc.bpm === 'number' && doc.bpm > 0) ? doc.bpm : '';
+    offIn.value = (typeof doc.gridOff === 'number') ? doc.gridOff : '';
+  }
+  bpmIn.addEventListener('change', function () {
+    doc.bpm = +this.value || 0;
+    save(); drawGrid();
+  });
+  offIn.addEventListener('change', function () {
+    doc.gridOff = +this.value || 0;
+    save(); drawGrid();
+  });
+
+  function drawGrid() {
+    var g = $('grid');
+    var duration = dur(), st = gridStep();
+    var w = Math.min(32000, Math.ceil(duration * pps));
+    g.width = w || 1;
+    g.style.width = (w || 1) + 'px';
+    if (!duration || !st) return;
+    var ctx = g.getContext('2d');
+    ctx.clearRect(0, 0, w, 214);
+    ctx.fillStyle = cssVar('--muted') || '#888';
+    var off = +doc.gridOff || 0;
+    var k0 = Math.ceil((0 - off) / st);
+    for (var k = k0; ; k++) {
+      var t = off + k * st;
+      if (t > duration) break;
+      var m = ((k % 16) + 16) % 16;
+      /* 마디(16칸)·박(4칸)·16비트 순으로 진하게 */
+      ctx.globalAlpha = m === 0 ? 0.4 : (m % 4 === 0 ? 0.2 : 0.08);
+      ctx.fillRect(Math.round(t * pps), 0, 1, 214);
+    }
+    ctx.globalAlpha = 1;
+  }
+
   function placedList() {
     var arr = [];
     doc.lines.forEach(function (line, li) {
@@ -1170,7 +1238,7 @@
     }).join('');
     lastNowKey = '';
   }
-  function layoutTimeline() { drawWave(); renderTlSyls(); renderQueue(); updatePlayhead(true); }
+  function layoutTimeline() { gridInit(); drawGrid(); drawWave(); renderTlSyls(); renderQueue(); updatePlayhead(true); }
 
   function updatePlayhead(force) {
     var duration = dur();
@@ -1211,7 +1279,9 @@
     if (!anyLoaded()) { flash('먼저 오디오를 불러오세요.'); return; }
     var q = queueList()[0];
     if (!q) { flash('모든 글자가 이미 배치됐습니다.'); return; }
-    doc.lines[q.li][q.ci].t = Math.round(curTime() * 100) / 100;
+    var tt = curTime();
+    if (snapChk.checked) tt = snapT(tt);
+    doc.lines[q.li][q.ci].t = Math.round(tt * 1000) / 1000;
     save();
     renderTlSyls();
     renderQueue();
@@ -1254,7 +1324,8 @@
   function tlMove(e) {
     if (!tlDrag || !tlSel) return;
     var nt = clamp(tlDrag.t0 + (e.clientX - tlDrag.x0) / pps, 0, dur() || 1e9);
-    doc.lines[tlSel.li][tlSel.ci].t = Math.round(nt * 100) / 100;
+    if (snapChk.checked) nt = snapT(nt);
+    doc.lines[tlSel.li][tlSel.ci].t = Math.round(nt * 1000) / 1000;
     tlDrag.moved = true;
     var el = tlSyls.querySelector('.tl-syl[data-li="' + tlSel.li + '"][data-ci="' + tlSel.ci + '"]');
     if (el) el.style.left = (doc.lines[tlSel.li][tlSel.ci].t * pps) + 'px';
