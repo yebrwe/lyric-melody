@@ -332,6 +332,8 @@
       <button class="btn" id="zoomOut">− 축소</button>
       <button class="btn" id="zoomIn">＋ 확대</button>
       <button class="btn primary" id="tapBtn" disabled>다음 글자 찍기 (Enter)</button>
+      <button class="btn" id="shiftL" title="배치된 글자 전체를 왼쪽으로 16비트 1칸 (Shift+클릭 = 1박)">전체 ◀</button>
+      <button class="btn" id="shiftR" title="배치된 글자 전체를 오른쪽으로 16비트 1칸 (Shift+클릭 = 1박)">전체 ▶</button>
       <button class="btn" id="clearTimes">배치 전체 지우기</button>
       <span id="audioName" class="audioname">원곡과 MR을 각각 불러오면 동시에 재생되고, 트랙 버튼으로 끄고 켤 수 있습니다</span>
     </div>
@@ -360,7 +362,9 @@
         배치된 글자는 <b>좌우 드래그</b>로 미세 조정 · 글자를 클릭하면 음이 선택되어 <b>↑ ↓</b> 계단 수정(마지막 음에서 연음 추가),
         <b>1~9</b> 바이브레이션, <b>Delete</b> 음 삭제 · <b>Shift+Delete</b> 또는 ✕ = 배치 해제 · 파형 클릭 = 해당 위치로 이동 ·
         <b>Space</b> 재생/일시정지 · ← → 2초 이동 · 레인 왼쪽 버튼으로 트랙별 소리 켜고 끄기 ·
-        <b>BPM·첫 박</b>을 입력하면 16비트 격자가 깔리고(진한 선 = 마디, 중간 = 박), <b>격자 스냅</b>이 켜져 있으면 찍기·드래그가 가장 가까운 16비트 칸에 자동으로 붙습니다 ·
+        <b>BPM·첫 박</b>을 입력하면 16비트 격자가 깔리고(진한 선 = 마디, 중간 = 박), <b>격자 스냅</b>이 켜져 있으면 찍기·드래그가 가장 가까운 16비트 칸에 자동으로 붙습니다
+        (한 칸에는 글자 하나만 — 찍은 칸이 차 있으면 자동으로 다음 빈 칸에 배치) ·
+        <b>[전체 ◀ ▶]</b> = 배치된 글자 전체를 16비트 한 칸씩 이동, Shift+클릭 = 1박(4칸) ·
         오디오는 이 브라우저에 저장되어 다음에도 자동으로 열립니다
       </p>
     </div>
@@ -1324,18 +1328,52 @@
     rafId = playing ? requestAnimationFrame(rafLoop) : null;
   }
 
+  /* 격자 한 칸에는 글자 하나 — 동시에 두 글자를 말할 수 없음 */
+  function slotTaken(t, li, ci) {
+    var st = gridStep() || 0.05;
+    var pl = placedList();
+    for (var i = 0; i < pl.length; i++) {
+      var p = pl[i];
+      if (p.li === li && p.ci === ci) continue;
+      if (Math.abs(p.cell.t - t) < st * 0.5) return true;
+    }
+    return false;
+  }
   function tapPlace() {
     if (!anyLoaded()) { flash('먼저 오디오를 불러오세요.'); return; }
     var q = queueList()[0];
     if (!q) { flash('모든 글자가 이미 배치됐습니다.'); return; }
     var tt = curTime();
-    if (snapChk.checked) tt = snapT(tt);
+    if (snapChk.checked) {
+      tt = snapT(tt);
+      var st = gridStep();
+      if (st) {
+        while (slotTaken(tt, q.li, q.ci)) tt += st;  /* 차 있으면 다음 빈 칸으로 */
+      }
+    }
     doc.lines[q.li][q.ci].t = Math.round(tt * 1000) / 1000;
     save();
     renderTlSyls();
     renderQueue();
   }
   tapBtn.addEventListener('click', tapPlace);
+
+  function shiftAll(mult, e) {
+    var st = gridStep() || 0.1;
+    var d = st * mult * (e && e.shiftKey ? 4 : 1);
+    var pl = placedList();
+    if (!pl.length) { flash('배치된 글자가 없습니다.'); return; }
+    if (d < 0) {
+      var minT = Math.min.apply(null, pl.map(function (p) { return p.cell.t; }));
+      if (minT + d < -1e-6) { flash('더 왼쪽으로 이동할 수 없습니다.'); return; }
+    }
+    pl.forEach(function (p) { p.cell.t = Math.round((p.cell.t + d) * 1000) / 1000; });
+    save();
+    renderTlSyls();
+    updatePlayhead(true);
+  }
+  $('shiftL').addEventListener('click', function (e) { shiftAll(-1, e); });
+  $('shiftR').addEventListener('click', function (e) { shiftAll(1, e); });
 
   /* 빈 곳 드래그 = 가로 스크롤(팬), 짧은 클릭 = 그 위치로 이동 */
   var pan = null;
@@ -1395,7 +1433,10 @@
   function tlMove(e) {
     if (!tlDrag || !tlSel) return;
     var nt = clamp(tlDrag.t0 + (e.clientX - tlDrag.x0) / pps, 0, dur() || 1e9);
-    if (snapChk.checked) nt = snapT(nt);
+    if (snapChk.checked) {
+      nt = snapT(nt);
+      if (slotTaken(nt, tlSel.li, tlSel.ci)) return;  /* 차 있는 칸으로는 이동 불가 */
+    }
     doc.lines[tlSel.li][tlSel.ci].t = Math.round(nt * 1000) / 1000;
     tlDrag.moved = true;
     var el = tlSyls.querySelector('.tl-syl[data-li="' + tlSel.li + '"][data-ci="' + tlSel.ci + '"]');
