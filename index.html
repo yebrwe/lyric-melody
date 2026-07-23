@@ -208,8 +208,8 @@
   .tl-syls { position: absolute; top: 100px; left: 0; right: 0; bottom: 0; }
   .tl-syl {
     position: absolute; top: 0; height: 100%;
-    display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start;
-    padding-left: 3px;
+    display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-end;
+    padding-left: 3px; padding-bottom: 3px;
     border-left: 1px dashed var(--edge);
     cursor: grab;
     user-select: none; -webkit-user-select: none; touch-action: none;
@@ -219,6 +219,14 @@
   .tl-syl.sel .tch { color: var(--accent); font-weight: 700; }
   .tl-syl.now { border-left: 2px solid var(--accent); }
   .tl-syl.now .tch { color: var(--accent); }
+  .tlx {
+    position: absolute; top: 2px; right: -7px;
+    width: 14px; height: 14px; border-radius: 50%;
+    background: var(--edge); color: var(--ink);
+    font-size: 9px; line-height: 14px; text-align: center;
+    cursor: pointer;
+  }
+  .tlx:hover { background: var(--accent); color: var(--accent-ink); }
   .playhead {
     position: absolute; top: 0; bottom: 0; width: 2px;
     background: var(--accent);
@@ -310,7 +318,8 @@
       </div>
       <p class="help">
         오디오를 불러오고 <b>재생하면서 글자가 불리는 순간 Enter</b>(또는 [다음 글자 찍기])를 누르면 큐의 다음 글자가 그 시각에 배치됩니다 ·
-        배치된 글자는 <b>좌우 드래그</b>로 미세 조정, 클릭 후 <b>Delete</b>로 회수 · 파형 클릭 = 해당 위치로 이동 ·
+        배치된 글자는 <b>좌우 드래그</b>로 미세 조정 · 글자를 클릭하면 음이 선택되어 <b>↑ ↓</b> 계단 수정(마지막 음에서 연음 추가),
+        <b>1~9</b> 바이브레이션, <b>Delete</b> 음 삭제 · <b>Shift+Delete</b> 또는 ✕ = 배치 해제 · 파형 클릭 = 해당 위치로 이동 ·
         <b>Space</b> 재생/일시정지 · ← → 2초 이동 · 원곡/MR 트랙 버튼으로 각각 소리를 켜고 끌 수 있습니다 ·
         오디오는 이 브라우저에 저장되어 다음에도 자동으로 열립니다
       </p>
@@ -825,14 +834,14 @@
     if (mode === 'time') {
       if (k === ' ') { playPause(); e.preventDefault(); }
       else if (k === 'Enter') { tapPlace(); e.preventDefault(); }
+      else if (k === 'ArrowUp') { tlSetDir(1); e.preventDefault(); }
+      else if (k === 'ArrowDown') { tlSetDir(-1); e.preventDefault(); }
       else if (k === 'Backspace' || k === 'Delete') {
-        if (tlSel) {
-          delete doc.lines[tlSel.li][tlSel.ci].t;
-          tlSel = null;
-          save(); renderTlSyls(); renderQueue();
-        }
+        if (e.shiftKey) tlUnplace();
+        else tlDelNote();
         e.preventDefault();
       }
+      else if (/^[0-9]$/.test(k)) { tlVib(+k); }
       else if (k === 'ArrowLeft') { seekTo(curTime() - 2); e.preventDefault(); }
       else if (k === 'ArrowRight') { seekTo(curTime() + 2); e.preventDefault(); }
       return;
@@ -1129,7 +1138,9 @@
     tlSyls.innerHTML = placedList().map(function (p) {
       var isSel = tlSel && tlSel.li === p.li && tlSel.ci === p.ci;
       return '<div class="tl-syl' + (isSel ? ' sel' : '') + '" data-li="' + p.li + '" data-ci="' + p.ci +
-        '" style="left:' + (p.cell.t * pps) + 'px">' + tplSVG(p.cell.notes) +
+        '" style="left:' + (p.cell.t * pps) + 'px">' +
+        (isSel ? '<span class="tlx" title="배치 해제 (Shift+Delete)">✕</span>' : '') +
+        glyphSVG(p.cell, isSel ? tlSel.ni : -1) +
         '<div class="tch">' + esc(p.cell.ch) + '</div></div>';
     }).join('');
     lastNowKey = '';
@@ -1190,10 +1201,25 @@
 
   var tlDrag = null;
   tlSyls.addEventListener('pointerdown', function (e) {
+    var xBtn = e.target.closest ? e.target.closest('.tlx') : null;
+    if (xBtn) {
+      tlUnplace();
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
     var el = e.target.closest ? e.target.closest('.tl-syl') : null;
     if (!el) return;
-    tlSel = { li: +el.dataset.li, ci: +el.dataset.ci };
-    tlDrag = { x0: e.clientX, t0: doc.lines[tlSel.li][tlSel.ci].t, moved: false };
+    var li = +el.dataset.li, ci = +el.dataset.ci;
+    var cell = doc.lines[li][ci];
+    var rect = el.getBoundingClientRect();
+    var n = cell.notes.length, ni = 0;
+    if (n > 1) {
+      var x0 = (rect.width - n * NOTE_W) / 2;
+      ni = clamp(Math.floor((e.clientX - rect.left - x0) / NOTE_W), 0, n - 1);
+    }
+    tlSel = { li: li, ci: ci, ni: ni };
+    tlDrag = { x0: e.clientX, t0: cell.t, moved: false };
     window.addEventListener('pointermove', tlMove);
     window.addEventListener('pointerup', tlUp, { once: true });
     e.preventDefault();
@@ -1233,12 +1259,53 @@
     layoutTimeline();
   });
 
+  function tlCell() { return tlSel ? doc.lines[tlSel.li][tlSel.ci] : null; }
+  function tlSetDir(d) {
+    var c = tlCell();
+    if (!c) { flash('타임라인의 글자를 먼저 클릭하세요.'); return; }
+    if (tlSel.ni === c.notes.length - 1) {
+      c.notes.push(newNote(d));
+      tlSel.ni = c.notes.length - 1;
+    } else if (tlSel.ni > 0) {
+      c.notes[tlSel.ni].d = d;
+    } else {
+      flash('첫 음은 기준이라 방향이 없습니다.');
+      return;
+    }
+    save(); renderTlSyls();
+  }
+  function tlDelNote() {
+    var c = tlCell();
+    if (!c) return;
+    if (c.notes.length > 1) {
+      c.notes.splice(tlSel.ni, 1);
+      c.notes[0].d = 0;
+      tlSel.ni = clamp(tlSel.ni, 0, c.notes.length - 1);
+    } else {
+      c.notes[0] = newNote();
+    }
+    save(); renderTlSyls();
+  }
+  function tlVib(n2) {
+    var c = tlCell();
+    if (!c) return;
+    c.notes[tlSel.ni].vn = n2;
+    save(); renderTlSyls();
+  }
+  function tlUnplace() {
+    if (!tlSel) return;
+    delete doc.lines[tlSel.li][tlSel.ci].t;
+    tlSel = null;
+    save(); renderTlSyls(); renderQueue();
+  }
+
   function setTab(m) {
     mode = m;
     document.querySelectorAll('.tab').forEach(function (b) { b.classList.toggle('active', b.dataset.tab === m); });
     [$('lyricsRow'), $('actions'), tplRow, sheet, $('helpEdit'), $('ioBox')].forEach(function (el) { el.hidden = m !== 'edit'; });
     [$('timeControls'), queueEl, timePane].forEach(function (el) { el.hidden = m !== 'time'; });
     if (m === 'time') layoutTimeline();
+    else render();
   }
   document.querySelectorAll('.tab').forEach(function (b) {
     b.addEventListener('click', function () { setTab(b.dataset.tab); });
