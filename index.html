@@ -385,20 +385,25 @@
       </div>
     </details>
     <details class="io" id="cloudBox" open>
-      <summary>☁ 클라우드 동기화 (Firebase) — <span id="cloudState">연결 안 됨</span></summary>
+      <summary>☁ 클라우드 동기화 — <span id="cloudState">연결 중…</span></summary>
       <p class="help">
-        Firebase 콘솔의 웹 앱 구성(JSON)을 붙여넣고 [연결] → [Google로 로그인] 하세요. 최초 한 번 [악보 올리기]나 [악보 불러오기]를 하면
-        이후에는 수정할 때마다 자동으로 클라우드에 저장되고, 다른 기기에서 로그인하면 이어서 작업할 수 있습니다. 오디오(원곡/MR)는 버튼으로 올리고 내려받습니다.
+        자동으로 클라우드에 연결됩니다. 처음 한 번만 <b>[Google로 로그인]</b> 후 <b>[악보 올리기]</b>를 누르면,
+        이후에는 수정할 때마다 자동 저장되고 다른 기기에서 로그인하면 이어서 작업할 수 있습니다. 오디오(원곡/MR)는 버튼으로 올리고 내려받습니다.
       </p>
-      <textarea id="fbCfg" rows="4" spellcheck="false" placeholder='{"apiKey":"...","authDomain":"...","projectId":"...","storageBucket":"...","appId":"..."}'></textarea>
       <div class="iobtns">
-        <button class="btn" id="fbConnect">연결</button>
-        <button class="btn" id="fbLogin" disabled>Google로 로그인</button>
+        <button class="btn primary" id="fbLogin" disabled>Google로 로그인</button>
         <button class="btn" id="fbPush" disabled>악보 올리기</button>
         <button class="btn" id="fbPull" disabled>악보 불러오기</button>
         <button class="btn" id="fbAudioUp" disabled>오디오 올리기</button>
         <button class="btn" id="fbAudioDown" disabled>오디오 내려받기</button>
       </div>
+      <details class="io">
+        <summary>다른 Firebase 프로젝트 연결 (고급)</summary>
+        <textarea id="fbCfg" rows="4" spellcheck="false" placeholder="firebaseConfig 스니펫이나 JSON을 통째로 붙여넣으세요"></textarea>
+        <div class="iobtns">
+          <button class="btn" id="fbConnect">이 구성으로 연결</button>
+        </div>
+      </details>
     </details>
   </main>
 </div>
@@ -1709,13 +1714,20 @@
     });
   });
 
+  /* 이 앱의 기본 Firebase 프로젝트 — 구성 입력 없이 자동 연결 */
+  var FB_DEFAULT_CFG = {
+    apiKey: 'AIzaSyABqKec0uTcPBybl51AxHbr6ZniSJ8dR7I',
+    authDomain: 'lyric-d92bb.firebaseapp.com',
+    projectId: 'lyric-d92bb',
+    storageBucket: 'lyric-d92bb.firebasestorage.app',
+    messagingSenderId: '412073777990',
+    appId: '1:412073777990:web:4d3257d2c0a52fd9232347'
+  };
   (function () {
     var savedCfg = null;
     try { savedCfg = JSON.parse(localStorage.getItem('fb-config')); } catch (e) {}
-    if (savedCfg) {
-      fbCfgTa.value = JSON.stringify(savedCfg);
-      fbInit(savedCfg);
-    }
+    if (savedCfg) fbCfgTa.value = JSON.stringify(savedCfg);
+    fbInit(savedCfg || FB_DEFAULT_CFG);
   })();
 
   /* ---------- 시작 ---------- */
