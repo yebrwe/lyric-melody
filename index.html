@@ -197,6 +197,15 @@
   .queue .q { padding: 1px 6px; border: 1px solid var(--edge); border-radius: 4px; color: var(--muted); }
   .queue .q.first { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 700; }
 
+  .tl-wrap { position: relative; }
+  .tl-labels span {
+    position: absolute; left: 6px;
+    font-size: 10px; color: var(--muted);
+    background: var(--paper);
+    padding: 0 5px; border-radius: 3px;
+    pointer-events: none;
+    z-index: 2;
+  }
   .timepane .tl-scroll {
     position: relative; overflow-x: auto;
     background: var(--paper);
@@ -309,11 +318,17 @@
   <main>
     <div id="sheet" class="sheet"></div>
     <div id="timePane" class="timepane" hidden>
-      <div class="tl-scroll" id="tlScroll">
-        <div class="tl-inner" id="tlInner">
-          <canvas id="wave" height="96"></canvas>
-          <div id="tlSyls" class="tl-syls"></div>
-          <div class="playhead" id="playhead"></div>
+      <div class="tl-wrap">
+        <div class="tl-scroll" id="tlScroll">
+          <div class="tl-inner" id="tlInner">
+            <canvas id="wave" height="96"></canvas>
+            <div id="tlSyls" class="tl-syls"></div>
+            <div class="playhead" id="playhead"></div>
+          </div>
+        </div>
+        <div class="tl-labels">
+          <span id="labOrig" style="top:13px">원곡</span>
+          <span id="labMr" style="top:56px">MR</span>
         </div>
       </div>
       <p class="help">
@@ -909,7 +924,7 @@
     tlSyls = $('tlSyls'), playheadEl = $('playhead'), timePane = $('timePane'),
     audioNameEl = $('audioName'), playBtn = $('playBtn'), tapBtn = $('tapBtn'),
     timeDisp = $('timeDisp'), queueEl = $('queue');
-  var pps = 60, peaks = null, tlSel = null, rafId = null, lastNowKey = '';
+  var pps = 60, tlSel = null, rafId = null, lastNowKey = '';
 
   function idb(cb) {
     try {
@@ -1033,6 +1048,8 @@
       btn.textContent = tr.label + ' ' + (tr.on ? '🔊' : '🔇');
       btn.title = tr.name || '';
     });
+    $('labOrig').style.opacity = tracks.orig.buffer ? 1 : 0.35;
+    $('labMr').style.opacity = tracks.mr.buffer ? 1 : 0.35;
     var names = [];
     if (tracks.orig.name) names.push('원곡: ' + tracks.orig.name);
     if (tracks.mr.name) names.push('MR: ' + tracks.mr.name);
@@ -1046,6 +1063,7 @@
     tr.on = !tr.on;
     if (tr.gainNode) tr.gainNode.gain.value = tr.on ? 1 : 0;
     updateTrackUI();
+    drawWave();
   }
   $('muteOrig').addEventListener('click', function () { toggleTrack('orig'); });
   $('muteMr').addEventListener('click', function () { toggleTrack('mr'); });
@@ -1058,7 +1076,7 @@
         if (playing) playPause();
         tracks[k].buffer = ab;
         tracks[k].name = name;
-        peaks = buildPeaks(tracks.orig.buffer || tracks.mr.buffer);
+        tracks[k].peaks = buildPeaks(ab);
         updateTrackUI();
         layoutTimeline();
         if (wasPlaying) playPause();
@@ -1078,7 +1096,7 @@
 
   function drawWave() {
     var duration = dur();
-    if (!peaks || !duration) return;
+    if (!duration) return;
     var w = Math.min(32000, Math.ceil(duration * pps));
     waveCv.width = w;
     waveCv.style.width = w + 'px';
@@ -1086,6 +1104,7 @@
     var ctx = waveCv.getContext('2d');
     ctx.clearRect(0, 0, w, 96);
     var ink = cssVar('--muted') || '#888';
+    var acc = cssVar('--accent') || '#5580dd';
     ctx.fillStyle = ink;
     ctx.font = '9px sans-serif';
     for (var s = 0; s <= duration; s++) {
@@ -1093,20 +1112,29 @@
       if (s % 5 === 0) { ctx.fillRect(x, 0, 1, 8); ctx.fillText(fmt(s).replace('.0', ''), x + 3, 9); }
       else if (pps >= 30) ctx.fillRect(x, 0, 1, 4);
     }
-    ctx.globalAlpha = 0.75;
-    var mid = 56, half = 38;
-    for (var x2 = 0; x2 < w; x2++) {
-      var b0 = Math.floor(x2 / pps * peaks.perSec);
-      var b1 = Math.max(b0 + 1, Math.floor((x2 + 1) / pps * peaks.perSec));
-      var lo2 = 1, hi2 = -1;
-      for (var b = b0; b < b1 && b < peaks.mins.length; b++) {
-        if (peaks.mins[b] < lo2) lo2 = peaks.mins[b];
-        if (peaks.maxs[b] > hi2) hi2 = peaks.maxs[b];
+    ctx.globalAlpha = 0.15;
+    ctx.fillStyle = ink;
+    ctx.fillRect(0, 53, w, 1);
+    /* 두 레인: 위 = 원곡, 아래 = MR (꺼진 트랙은 흐리게) */
+    [['orig', 33, ink], ['mr', 74, acc]].forEach(function (lane) {
+      var tr = tracks[lane[0]];
+      if (!tr.peaks) return;
+      var mid = lane[1], half = 19;
+      ctx.fillStyle = lane[2];
+      ctx.globalAlpha = tr.on ? 0.75 : 0.22;
+      for (var x2 = 0; x2 < w; x2++) {
+        var b0 = Math.floor(x2 / pps * tr.peaks.perSec);
+        var b1 = Math.max(b0 + 1, Math.floor((x2 + 1) / pps * tr.peaks.perSec));
+        var lo2 = 1, hi2 = -1;
+        for (var b = b0; b < b1 && b < tr.peaks.mins.length; b++) {
+          if (tr.peaks.mins[b] < lo2) lo2 = tr.peaks.mins[b];
+          if (tr.peaks.maxs[b] > hi2) hi2 = tr.peaks.maxs[b];
+        }
+        if (hi2 < lo2) continue;
+        var y0 = mid - hi2 * half;
+        ctx.fillRect(x2, y0, 1, Math.max(1, (mid - lo2 * half) - y0));
       }
-      if (hi2 < lo2) continue;
-      var y0 = mid - hi2 * half;
-      ctx.fillRect(x2, y0, 1, Math.max(1, (mid - lo2 * half) - y0));
-    }
+    });
     ctx.globalAlpha = 1;
   }
 
