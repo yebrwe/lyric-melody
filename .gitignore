@@ -5,3 +5,4 @@
 lyric-melody.html
 
 .vercel
+.env*
