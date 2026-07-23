@@ -195,6 +195,28 @@
     align-self: center; flex: 1; min-width: 120px;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
+  .recordbar {
+    display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+    padding: 7px 9px;
+    background: var(--paper);
+    border: 1px solid var(--edge); border-radius: 7px;
+  }
+  .recordbar .record-note {
+    font-size: 11.5px; color: var(--muted);
+    flex: 1; min-width: 210px;
+  }
+  .recordbar audio { width: min(280px, 100%); height: 32px; }
+  .recordbar .gridlab { cursor: pointer; }
+  .btn.recording {
+    background: #B42318; border-color: #B42318; color: #fff;
+  }
+  .btn.recording:hover { color: #fff; filter: brightness(1.08); }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .btn:disabled:hover { border-color: var(--edge); color: var(--ink); filter: none; }
+  .sr-only {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+  }
   .queue { display: flex; gap: 3px; align-items: center; flex-wrap: wrap; font-size: 13px; }
   .queue .qlab { font-size: 11px; color: var(--muted); margin-right: 4px; }
   .queue .q { padding: 1px 6px; border: 1px solid var(--edge); border-radius: 4px; color: var(--muted); }
@@ -313,7 +335,7 @@
   </div>
 </div>
 
-<div class="app">
+<div class="app" id="appRoot" inert>
   <header class="toolbar">
     <div class="brand">
       <strong>가사 멜로디 표기</strong>
@@ -371,6 +393,17 @@
       <button class="btn" id="clearTimes">배치 전체 지우기</button>
       <span id="audioName" class="audioname">원곡과 MR을 각각 불러오면 동시에 재생되고, 트랙 버튼으로 끄고 켤 수 있습니다</span>
     </div>
+    <div class="recordbar" id="recordControls" hidden>
+      <button class="btn" id="recordBtn" disabled aria-pressed="false">● MR 녹음</button>
+      <label class="gridlab" title="켜면 MR과 목소리가 한 파일로 저장되고, 끄면 목소리만 저장됩니다">
+        <input type="checkbox" id="recordMix" checked> 녹음 파일에 MR 포함
+      </label>
+      <span class="record-note" id="recordStatus">🎧 유선 이어폰 권장 · 현재 재생 위치부터 녹음합니다</span>
+      <span class="sr-only" id="recordAnnounce" role="status" aria-live="polite"></span>
+      <audio id="recordPreview" controls preload="metadata" hidden></audio>
+      <a class="btn" id="recordDownload" href="#" download hidden style="text-decoration:none">녹음 저장</a>
+      <button class="btn" id="recordDelete" hidden>녹음 삭제</button>
+    </div>
     <div class="queue" id="queue" hidden></div>
   </header>
 
@@ -396,6 +429,8 @@
         배치된 글자는 <b>좌우 드래그</b>로 미세 조정 · 글자를 클릭하면 음이 선택되어 <b>↑ ↓</b> 계단 수정(마지막 음에서 연음 추가),
         <b>1~9</b> 바이브레이션, <b>Delete</b> 음 삭제 · <b>Shift+Delete</b> 또는 ✕ = 배치 해제 · 파형 클릭 = 해당 위치로 이동 ·
         <b>Space</b> 재생/일시정지 · ← → 2초 이동 · 레인 왼쪽 버튼으로 트랙별 소리 켜고 끄기 ·
+        <b>[● MR 녹음]</b> = 현재 위치부터 원곡은 자동으로 끄고 MR만 들으며 녹음(기본은 MR+목소리 한 파일, 체크를 끄면 목소리만) ·
+        녹음이 끝나면 바로 듣거나 파일로 저장할 수 있으며, 스피커 소리 유입을 막으려면 유선 이어폰을 권장합니다(Bluetooth는 싱크가 늦을 수 있음) ·
         <b>BPM·첫 박</b>을 입력하면 16비트 격자가 깔리고(진한 선 = 마디, 중간 = 박), <b>격자 스냅</b>이 켜져 있으면 찍기·드래그가 가장 가까운 16비트 칸에 자동으로 붙습니다
         (한 칸에는 글자 하나만 — 찍은 칸이 차 있으면 자동으로 다음 빈 칸에 배치) ·
         <b>[전체 ◀ ▶]</b> = 배치된 글자 전체를 16비트 한 칸씩 이동, Shift+클릭 = 1박(4칸) ·
@@ -1035,7 +1070,8 @@
   /* ---------- 키보드 ---------- */
 
   document.addEventListener('keydown', function (e) {
-    if (e.target && e.target.matches && e.target.matches('textarea, input, [contenteditable]')) return;
+    if (e.target && e.target.closest &&
+        e.target.closest('textarea, input, select, button, a, audio, [contenteditable]')) return;
     if (gateEl && !gateEl.hidden) return;
     var k = e.key;
     if (mode === 'time') {
@@ -1132,7 +1168,10 @@
   var waveCv = $('wave'), tlScroll = $('tlScroll'), tlInner = $('tlInner'),
     tlSyls = $('tlSyls'), playheadEl = $('playhead'), timePane = $('timePane'),
     audioNameEl = $('audioName'), playBtn = $('playBtn'), tapBtn = $('tapBtn'),
-    timeDisp = $('timeDisp'), queueEl = $('queue');
+    timeDisp = $('timeDisp'), queueEl = $('queue'), recordControls = $('recordControls'),
+    recordBtn = $('recordBtn'), recordMix = $('recordMix'), recordStatus = $('recordStatus'),
+    recordPreview = $('recordPreview'), recordDownload = $('recordDownload'),
+    recordDelete = $('recordDelete'), recordAnnounce = $('recordAnnounce');
   var pps = 60, tlSel = null, rafId = null, lastNowKey = '';
 
   var idbOpenPromise = null;
@@ -1246,7 +1285,9 @@
   var audioLatest = { orig: null, mr: null };
   var audioRemoteGeneration = { orig: undefined, mr: undefined };
   var audioUploadChains = {};
-  var playing = false, playOff = 0, playT0 = 0;
+  var playing = false, playStarting = false, playRequest = 0, playOff = 0, playT0 = 0;
+  var recordSession = null, recordResults = {}, recordErrors = {};
+  var MAX_RECORD_SECONDS = 30 * 60, MAX_RECORD_BYTES = 150 * 1024 * 1024;
 
   function dur() {
     return Math.max(tracks.orig.buffer ? tracks.orig.buffer.duration : 0,
@@ -1288,31 +1329,55 @@
       g.gain.value = tr.on ? 1 : 0;
       s.connect(g);
       g.connect(actx.destination);
+      if (k === 'mr' && recordSession && recordSession.phase === 'recording' &&
+          recordSession.includeMr && recordSession.mixDest) {
+        var recordMrGain = actx.createGain();
+        recordMrGain.gain.value = 0.72;
+        g.connect(recordMrGain);
+        recordMrGain.connect(recordSession.mixBus || recordSession.mixDest);
+        recordSession.mrRecordGain = recordMrGain;
+      }
       s.start(0, playOff);
       tr.src = s;
       tr.gainNode = g;
     });
   }
   function playPause() {
+    if (recordSession) {
+      if (recordSession.phase === 'recording') stopRecording(false);
+      else flash('마이크를 준비하거나 녹음을 정리하는 중입니다.');
+      return;
+    }
     if (!anyLoaded()) { flash('먼저 오디오를 불러오세요.'); return; }
-    actx = actx || new AC();
-    if (actx.state === 'suspended') actx.resume();
-    if (playing) {
-      playOff = curTime();
-      playing = false;
-      stopSources();
-      playBtn.textContent = '▶ 재생';
-      updatePlayhead(true);
-    } else {
+    if (!recordPreview.paused) recordPreview.pause();
+    if (playing || playStarting) { pauseTimelinePlayback(); return; }
+    var request = ++playRequest;
+    playStarting = true;
+    playBtn.textContent = '오디오 준비 중…';
+    Promise.resolve().then(function () { return ensureAudioRunning(); }).then(function () {
+      if (request !== playRequest || recordSession || playing || !anyLoaded()) return;
+      playStarting = false;
       if (playOff >= dur() - 0.05) playOff = 0;
       playT0 = actx.currentTime;
       playing = true;
       startSources();
       playBtn.textContent = '⏸ 일시정지';
       if (!rafId) rafId = requestAnimationFrame(rafLoop);
-    }
+    }).catch(function (e) {
+      if (request !== playRequest) return;
+      playStarting = false;
+      if (playing) {
+        playing = false;
+        stopSources();
+        updatePlayhead(true);
+      }
+      playBtn.textContent = '▶ 재생';
+      recordStatus.textContent = '오디오 재생 오류: ' + ((e && e.message) || e);
+      flash('오디오 재생을 시작하지 못했습니다.');
+    });
   }
   function seekTo(t) {
+    if (recordSession) { flash('녹음 중에는 재생 위치를 옮길 수 없습니다.'); return; }
     t = clamp(t, 0, dur());
     if (playing) {
       stopSources();
@@ -1338,8 +1403,10 @@
     audioNameEl.textContent = names.length ? names.join('  ·  ')
       : '원곡과 MR을 각각 불러오면 동시에 재생되고, 트랙 버튼으로 끄고 켤 수 있습니다';
     playBtn.disabled = tapBtn.disabled = !anyLoaded();
+    updateRecordUI();
   }
   function toggleTrack(k) {
+    if (recordSession) { flash('녹음 중에는 트랙을 바꿀 수 없습니다.'); return; }
     var tr = tracks[k];
     if (!tr.buffer) return;
     tr.on = !tr.on;
@@ -1350,7 +1417,403 @@
   $('muteOrig').addEventListener('click', function () { toggleTrack('orig'); });
   $('muteMr').addEventListener('click', function () { toggleTrack('mr'); });
 
+  /* MR을 들으며 마이크를 녹음한다. 결과는 기존 원곡/MR을 덮어쓰지 않고 로컬 미리보기로만 둔다. */
+  function recordingSupported() {
+    return !!(AC && window.MediaRecorder && navigator.mediaDevices &&
+      navigator.mediaDevices.getUserMedia && window.URL && URL.createObjectURL);
+  }
+  function ensureAudioRunning() {
+    if (!actx || actx.state === 'closed') actx = new AC();
+    var ready = actx.state === 'running' ? Promise.resolve() : actx.resume();
+    return Promise.resolve(ready).then(function () {
+      if (actx.state !== 'running') throw new Error('오디오 재생을 시작할 수 없습니다. 화면을 누른 뒤 다시 시도해 주세요.');
+      return actx;
+    });
+  }
+  function stopMediaStream(stream) {
+    if (!stream || !stream.getTracks) return;
+    stream.getTracks().forEach(function (track) {
+      try { track.stop(); } catch (e) {}
+    });
+  }
+  function recordingOptions() {
+    var types = [
+      'audio/webm;codecs=opus',
+      'audio/mp4;codecs=mp4a.40.2',
+      'audio/mp4',
+      'audio/ogg;codecs=opus',
+      'audio/webm'
+    ];
+    if (!MediaRecorder.isTypeSupported) return {};
+    for (var i = 0; i < types.length; i++) {
+      if (MediaRecorder.isTypeSupported(types[i])) return { mimeType: types[i] };
+    }
+    return {};
+  }
+  function recordingExt(mime) {
+    mime = String(mime || '').toLowerCase();
+    if (mime.indexOf('mp4') >= 0 || mime.indexOf('aac') >= 0) return 'm4a';
+    if (mime.indexOf('ogg') >= 0) return 'ogg';
+    return 'webm';
+  }
+  function recordingFilename(mime) {
+    var d = new Date();
+    function pad(n) { return String(n).padStart(2, '0'); }
+    return 'lyric-melody-' + d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) + '-' +
+      pad(d.getHours()) + pad(d.getMinutes()) + pad(d.getSeconds()) + '.' + recordingExt(mime);
+  }
+  function recordingError(e) {
+    var name = e && e.name;
+    if (name === 'NotAllowedError' || name === 'SecurityError') {
+      return '마이크 권한이 거부되었습니다. 주소창의 마이크 권한을 허용해 주세요.';
+    }
+    if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
+      return '사용할 수 있는 마이크를 찾지 못했습니다.';
+    }
+    if (name === 'NotReadableError' || name === 'TrackStartError') {
+      return '마이크를 열 수 없습니다. 다른 앱이 사용 중인지 확인해 주세요.';
+    }
+    if (name === 'NotSupportedError') return '이 브라우저는 오디오 녹음을 지원하지 않습니다.';
+    return '녹음 오류: ' + ((e && (e.message || e.name)) || '알 수 없는 오류');
+  }
+  function recordingOwnerUid() {
+    return (typeof fb !== 'undefined' && fb && fb.user) ? fb.user.uid : null;
+  }
+  function recordingOwnerKey(uid) { return uid ? 'user:' + uid : 'local'; }
+  function currentRecordingOwnerKey() { return recordingOwnerKey(recordingOwnerUid()); }
+  function currentRecordResult() { return recordResults[currentRecordingOwnerKey()] || null; }
+  function announceRecording(ownerKey, message) {
+    if (ownerKey === currentRecordingOwnerKey()) recordAnnounce.textContent = message;
+  }
+  function syncRecordingPreview(result) {
+    var ownerKey = result ? result.ownerKey : '';
+    var objectUrl = result ? result.url : '';
+    if (recordPreview.dataset.ownerKey === ownerKey && recordPreview.dataset.objectUrl === objectUrl) return;
+    try { recordPreview.pause(); } catch (e) {}
+    recordPreview.removeAttribute('src');
+    recordDownload.removeAttribute('href');
+    recordDownload.removeAttribute('download');
+    if (result) {
+      recordPreview.src = result.url;
+      recordDownload.href = result.url;
+      recordDownload.download = result.filename;
+    } else {
+      try { recordPreview.load(); } catch (e) {}
+    }
+    recordPreview.dataset.ownerKey = ownerKey;
+    recordPreview.dataset.objectUrl = objectUrl;
+  }
+  function clearRecordingOutput() {
+    var ownerKey = currentRecordingOwnerKey();
+    var result = recordResults[ownerKey];
+    if (result && result.url) URL.revokeObjectURL(result.url);
+    delete recordResults[ownerKey];
+    delete recordErrors[ownerKey];
+    syncRecordingPreview(null);
+    updateRecordUI();
+  }
+  function updateRecordUI() {
+    var busy = !!recordSession;
+    var active = busy && recordSession.phase === 'recording';
+    var supported = recordingSupported();
+    var result = currentRecordResult();
+    var lastError = recordErrors[currentRecordingOwnerKey()] || '';
+    syncRecordingPreview(result);
+    recordBtn.classList.toggle('recording', active);
+    recordBtn.setAttribute('aria-pressed', active ? 'true' : 'false');
+    recordBtn.textContent = active ? '■ 녹음 종료' :
+      (busy && recordSession.phase === 'requesting' ? '마이크 준비 중…' :
+        (busy ? '녹음 정리 중…' : '● MR 녹음'));
+    recordBtn.disabled = busy ? !active : (!supported || !tracks.mr.buffer);
+    recordMix.disabled = busy;
+    $('fileOrig').disabled = $('fileMr').disabled = busy;
+    $('homeBtn').disabled = busy || !anyLoaded();
+    $('muteOrig').disabled = busy || !tracks.orig.buffer;
+    $('muteMr').disabled = busy || !tracks.mr.buffer;
+    playBtn.disabled = busy || !anyLoaded();
+    tapBtn.disabled = !anyLoaded();
+    recordPreview.hidden = recordDownload.hidden = recordDelete.hidden = !result || busy;
+    if (busy) {
+      if (recordSession.phase === 'requesting') recordStatus.textContent = '마이크 권한을 확인하는 중입니다…';
+      else if (recordSession.phase === 'stopping') recordStatus.textContent = '녹음 파일을 만드는 중입니다…';
+      else recordStatus.textContent = '● 녹음 중 0:00.0 · ' +
+        (recordSession.includeMr ? 'MR+목소리' : '목소리만');
+    } else if (!supported) {
+      recordStatus.textContent = '이 브라우저에서는 마이크 녹음을 사용할 수 없습니다';
+    } else if (lastError) {
+      recordStatus.textContent = lastError;
+    } else if (result) {
+      recordStatus.textContent = (result.notice ? result.notice + ' · ' : '녹음 완료 ') +
+        fmt(result.seconds) + ' · ' + (result.includeMr ? 'MR+목소리' : '목소리만') +
+        (result.saved ? ' · 기기에 저장됨' : ' · 기기에 저장하려면 [녹음 저장]');
+    } else {
+      recordStatus.textContent = '🎧 유선 이어폰 권장 · 현재 재생 위치부터 녹음합니다';
+    }
+  }
+  function pauseTimelinePlayback() {
+    playRequest++;
+    playStarting = false;
+    if (!playing) { playBtn.textContent = '▶ 재생'; return; }
+    playOff = curTime();
+    playing = false;
+    stopSources();
+    playBtn.textContent = '▶ 재생';
+    updatePlayhead(true);
+  }
+  function restoreRecordingTracks(session) {
+    if (!session || session.tracksRestored || !session.previousTrackState) return;
+    session.tracksRestored = true;
+    tracks.orig.on = session.previousTrackState.orig;
+    tracks.mr.on = session.previousTrackState.mr;
+    updateTrackUI();
+    drawWave();
+  }
+  function releaseRecordingResources(session) {
+    if (!session || session.resourcesReleased) return;
+    session.resourcesReleased = true;
+    if (session.autoStopTimer) clearTimeout(session.autoStopTimer);
+    try { if (session.mrRecordGain) session.mrRecordGain.disconnect(); } catch (e) {}
+    try { if (session.micSource) session.micSource.disconnect(); } catch (e) {}
+    try { if (session.mixBus) session.mixBus.disconnect(); } catch (e) {}
+    stopMediaStream(session.micStream);
+    if (session.mixDest) stopMediaStream(session.mixDest.stream);
+  }
+  function finalizeRecording(session) {
+    if (!session || session.finalized) return;
+    session.finalized = true;
+    releaseRecordingResources(session);
+    restoreRecordingTracks(session);
+    if (recordSession === session) recordSession = null;
+
+    if (session.error) {
+      recordErrors[session.ownerKey] = recordingError(session.error);
+      announceRecording(session.ownerKey, recordErrors[session.ownerKey]);
+      updateRecordUI();
+      flash(recordErrors[session.ownerKey]);
+      return;
+    }
+    if (session.discard) { updateRecordUI(); return; }
+
+    var mime = (session.recorder && session.recorder.mimeType) ||
+      (session.chunks[0] && session.chunks[0].type) || 'audio/webm';
+    var blob = new Blob(session.chunks, { type: mime });
+    if (!blob.size) {
+      recordErrors[session.ownerKey] = '녹음된 소리가 없습니다. 다시 시도해 주세요.';
+      announceRecording(session.ownerKey, recordErrors[session.ownerKey]);
+      updateRecordUI();
+      flash(recordErrors[session.ownerKey]);
+      return;
+    }
+    var previousResult = recordResults[session.ownerKey];
+    if (previousResult && previousResult.url) URL.revokeObjectURL(previousResult.url);
+    var objectUrl = URL.createObjectURL(blob);
+    var filename = recordingFilename(mime);
+    recordResults[session.ownerKey] = {
+      blob: blob,
+      seconds: Math.max(0, session.elapsed || 0),
+      includeMr: session.includeMr,
+      filename: filename,
+      notice: session.notice || '',
+      saved: false,
+      ownerKey: session.ownerKey,
+      url: objectUrl
+    };
+    delete recordErrors[session.ownerKey];
+    announceRecording(session.ownerKey, session.notice || '녹음이 완료되었습니다.');
+    updateRecordUI();
+    flash('녹음이 완료되었습니다. 바로 듣거나 파일로 저장할 수 있습니다.');
+  }
+  function stopRecording(discard) {
+    var session = recordSession;
+    if (!session) return;
+    session.discard = session.discard || !!discard;
+    if (session.phase === 'requesting') {
+      session.cancelled = true;
+      recordSession = null;
+      releaseRecordingResources(session);
+      updateRecordUI();
+      return;
+    }
+    if (session.phase === 'stopping') return;
+    session.phase = 'stopping';
+    pauseTimelinePlayback();
+    session.elapsed = Math.max(0, playOff - session.startOffset);
+    restoreRecordingTracks(session);
+    updateRecordUI();
+    try {
+      if (session.recorder && session.recorder.state !== 'inactive') session.recorder.stop();
+      else finalizeRecording(session);
+    } catch (e) {
+      session.error = e;
+      finalizeRecording(session);
+    }
+  }
+  function failRecording(session, e) {
+    if (!session || session.finalized) return;
+    if (session.cancelled && recordSession !== session) {
+      releaseRecordingResources(session);
+      return;
+    }
+    session.error = e || new Error('recording-failed');
+    recordErrors[session.ownerKey] = recordingError(session.error);
+    announceRecording(session.ownerKey, recordErrors[session.ownerKey]);
+    session.discard = true;
+    if (recordSession === session && session.phase === 'recording') {
+      stopRecording(true);
+      return;
+    }
+    session.cancelled = true;
+    restoreRecordingTracks(session);
+    releaseRecordingResources(session);
+    if (recordSession === session) recordSession = null;
+    updateRecordUI();
+    flash(recordingError(session.error));
+  }
+  function startRecording() {
+    if (recordSession) return;
+    if (gateEl && !gateEl.hidden) return;
+    if (!tracks.mr.buffer) { flash('먼저 MR을 불러오세요.'); return; }
+    if (!recordingSupported()) { flash('이 브라우저는 마이크 녹음을 지원하지 않습니다.'); return; }
+    var ownerKey = currentRecordingOwnerKey();
+    var previousResult = recordResults[ownerKey];
+    if (previousResult && !previousResult.saved &&
+        !window.confirm('기존 녹음을 아직 기기에 저장하지 않았습니다. 새 녹음으로 바꿀까요?')) return;
+    if (!recordPreview.paused) recordPreview.pause();
+    delete recordErrors[ownerKey];
+
+    var requestedOffset = curTime();
+    var session = {
+      phase: 'requesting', cancelled: false, discard: false, chunks: [], bytes: 0,
+      includeMr: !!recordMix.checked, requestedOffset: requestedOffset,
+      ownerKey: ownerKey,
+      previousTrackState: { orig: tracks.orig.on, mr: tracks.mr.on }
+    };
+    recordSession = session;
+    pauseTimelinePlayback();
+    updateRecordUI();
+
+    Promise.resolve().then(function () { return ensureAudioRunning(); }).then(function () {
+      if (recordSession !== session || session.cancelled) return null;
+      return navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+      });
+    }).then(function (stream) {
+      if (!stream) return null;
+      if (recordSession !== session || session.cancelled) {
+        stopMediaStream(stream);
+        return null;
+      }
+      session.micStream = stream;
+      stream.getAudioTracks().forEach(function (track) {
+        track.addEventListener('ended', function () {
+          if (recordSession !== session) return;
+          if (session.phase === 'recording') {
+            session.notice = '마이크 연결이 끊겨 녹음을 종료했습니다';
+            stopRecording(false);
+          } else if (session.phase === 'requesting') {
+            var endedError = new Error('마이크 연결이 끊겼습니다.');
+            endedError.name = 'NotReadableError';
+            failRecording(session, endedError);
+          }
+        });
+      });
+      return ensureAudioRunning().then(function () { return stream; });
+    }).then(function (stream) {
+      if (!stream || recordSession !== session || session.cancelled) return;
+      var recorderStream = stream;
+      if (session.includeMr) {
+        session.mixDest = actx.createMediaStreamDestination();
+        session.mixBus = actx.createDynamicsCompressor();
+        session.mixBus.threshold.value = -6;
+        session.mixBus.knee.value = 12;
+        session.mixBus.ratio.value = 4;
+        session.mixBus.attack.value = 0.003;
+        session.mixBus.release.value = 0.25;
+        session.mixBus.connect(session.mixDest);
+        session.micSource = actx.createMediaStreamSource(stream);
+        session.micSource.connect(session.mixBus);
+        recorderStream = session.mixDest.stream;
+      }
+      session.recorder = new MediaRecorder(recorderStream, recordingOptions());
+      session.recorder.ondataavailable = function (e) {
+        if (!e.data || !e.data.size) return;
+        session.chunks.push(e.data);
+        session.bytes += e.data.size;
+        if (session.bytes > MAX_RECORD_BYTES && session.phase === 'recording') {
+          setTimeout(function () {
+            if (recordSession === session && session.phase === 'recording') {
+              session.notice = '150MB 제한에 도달해 녹음을 종료했습니다';
+              flash('녹음 파일이 150MB에 도달해 자동으로 종료했습니다.');
+              stopRecording(false);
+            }
+          }, 0);
+        }
+      };
+      session.recorder.onerror = function (e) {
+        failRecording(session, (e && e.error) || new Error('media-recorder-error'));
+      };
+      session.recorder.onstop = function () {
+        if (session.phase === 'recording') {
+          session.notice = session.notice || '녹음 장치가 중지되어 녹음을 종료했습니다';
+          session.phase = 'stopping';
+          pauseTimelinePlayback();
+          session.elapsed = Math.max(0, playOff - session.startOffset);
+          restoreRecordingTracks(session);
+        }
+        finalizeRecording(session);
+      };
+
+      session.startOffset = requestedOffset >= tracks.mr.buffer.duration - 0.05 ? 0 : requestedOffset;
+      session.endAt = Math.min(tracks.mr.buffer.duration, session.startOffset + MAX_RECORD_SECONDS);
+      playOff = session.startOffset;
+      tracks.orig.on = false;
+      tracks.mr.on = true;
+      session.phase = 'recording';
+      recordBtn.blur();
+      announceRecording(session.ownerKey, session.includeMr
+        ? 'MR과 목소리 녹음을 시작했습니다.'
+        : '목소리 녹음을 시작했습니다.');
+      updateTrackUI();
+      drawWave();
+      session.recorder.start(500);
+      playT0 = actx.currentTime;
+      playing = true;
+      startSources();
+      session.autoStopTimer = setTimeout(function () {
+        if (recordSession === session && session.phase === 'recording') stopRecording(false);
+      }, Math.max(100, (session.endAt - session.startOffset) * 1000 + 100));
+      playBtn.textContent = '⏸ 일시정지';
+      if (!rafId) rafId = requestAnimationFrame(rafLoop);
+      flash(session.includeMr ? 'MR과 목소리를 함께 녹음합니다.' : 'MR을 들으며 목소리만 녹음합니다.');
+    }).catch(function (e) { failRecording(session, e); });
+  }
+  recordBtn.addEventListener('click', function () {
+    if (recordSession && recordSession.phase === 'recording') stopRecording(false);
+    else if (!recordSession) startRecording();
+  });
+  recordDelete.addEventListener('click', function () {
+    var result = currentRecordResult();
+    if (result && !result.saved && !window.confirm('아직 기기에 저장하지 않은 녹음을 삭제할까요?')) return;
+    clearRecordingOutput();
+    flash('녹음 파일을 삭제했습니다.');
+  });
+  recordDownload.addEventListener('click', function () {
+    var result = currentRecordResult();
+    if (!result) return;
+    result.saved = true;
+    updateRecordUI();
+  });
+  recordPreview.addEventListener('play', function () {
+    if ((playing || playStarting) && !recordSession) pauseTimelinePlayback();
+  });
+
   function loadTrack(k, blob, name, persist, expectedUid, expectedGeneration, expectedToken) {
+    if (recordSession) {
+      if (recordSession.phase === 'recording') recordSession.notice = '오디오 갱신으로 녹음을 종료했습니다';
+      stopRecording(false);
+      flash('오디오가 갱신되어 진행 중인 녹음을 종료했습니다.');
+    }
+    if (playStarting) pauseTimelinePlayback();
     var ownerUid = expectedUid !== undefined
       ? expectedUid
       : ((typeof fb !== 'undefined' && fb && fb.user) ? fb.user.uid : null);
@@ -1584,9 +2047,20 @@
         tlScroll.scrollLeft = Math.max(0, px - vw * 0.45);
       }
     }
+    if (recordSession && recordSession.phase === 'recording') {
+      recordStatus.textContent = '● 녹음 중 ' + fmt(Math.max(0, t - recordSession.startOffset)) + ' · ' +
+        (recordSession.includeMr ? 'MR+목소리' : '목소리만');
+    }
   }
   function rafLoop() {
-    if (playing && curTime() >= dur() - 0.02) {
+    if (recordSession && recordSession.phase === 'recording' &&
+        curTime() >= recordSession.endAt) {
+      stopRecording(false);
+      rafId = null;
+      return;
+    }
+    if ((!recordSession || recordSession.phase !== 'recording') &&
+        playing && curTime() >= dur() - 0.02) {
       playing = false;
       stopSources();
       playOff = dur();
@@ -1781,10 +2255,14 @@
   }
 
   function setTab(m) {
+    if (mode === 'time' && m !== 'time' && recordSession) {
+      if (recordSession.phase === 'recording') recordSession.notice = '화면 전환으로 녹음을 종료했습니다';
+      stopRecording(false);
+    }
     mode = m;
     document.querySelectorAll('.tab').forEach(function (b) { b.classList.toggle('active', b.dataset.tab === m); });
     [$('lyricsRow'), $('actions'), tplRow, sheet, $('helpEdit'), $('ioBox')].forEach(function (el) { el.hidden = m !== 'edit'; });
-    [$('timeControls'), queueEl, timePane].forEach(function (el) { el.hidden = m !== 'time'; });
+    [$('timeControls'), recordControls, queueEl, timePane].forEach(function (el) { el.hidden = m !== 'time'; });
     if (m === 'time') layoutTimeline();
     else render();
   }
@@ -1804,10 +2282,15 @@
   var cloudStateEl = $('cloudState');
   var gateEl = $('gate'), gateMsg = $('gateMsg'), gateLogin = $('gateLogin'),
     gateCloud = $('gateCloud'), gateLocal = $('gateLocal'), gateRetry = $('gateRetry'),
-    gateHosted = $('gateHosted'), gateOffline = $('gateOffline');
+    gateHosted = $('gateHosted'), gateOffline = $('gateOffline'), appRoot = $('appRoot');
 
   function gateShow(msg, actions) {
     actions = actions || {};
+    try { recordPreview.pause(); } catch (e) {}
+    if (recordSession) {
+      if (recordSession.phase === 'recording') recordSession.notice = '클라우드 안내로 녹음을 종료했습니다';
+      stopRecording(false);
+    } else pauseTimelinePlayback();
     gateEl.hidden = false;
     gateMsg.textContent = msg;
     gateLogin.style.display = actions.login ? '' : 'none';
@@ -1816,8 +2299,14 @@
     gateRetry.style.display = actions.retry ? '' : 'none';
     gateHosted.style.display = actions.hosted ? '' : 'none';
     gateOffline.style.display = actions.offline ? '' : 'none';
+    appRoot.inert = true;
+    setTimeout(function () {
+      var firstAction = [gateLogin, gateCloud, gateLocal, gateRetry, gateHosted, gateOffline]
+        .find(function (el) { return el.style.display !== 'none'; });
+      if (firstAction) firstAction.focus();
+    }, 0);
   }
-  function gateHide() { gateEl.hidden = true; }
+  function gateHide() { gateEl.hidden = true; appRoot.inert = false; }
 
   function cloudStatus(msg) { cloudStateEl.textContent = msg; }
   function errCode(e) { return (e && e.code) || String(e || '알 수 없는 오류'); }
@@ -1861,6 +2350,7 @@
         fb.writeChain = Promise.resolve();
         clearAudioTracks();
         fb.user = u;
+        updateRecordUI();
         fb.syncReady = false;
         fb.pendingConflict = null;
         fb.logoutPending = false;
@@ -2300,9 +2790,26 @@
     pushDoc(true);
   }
   document.addEventListener('visibilitychange', function () {
-    if (document.visibilityState === 'hidden') flushPendingCloudSave();
+    if (document.visibilityState === 'hidden') {
+      flushPendingCloudSave();
+      if (recordSession) {
+        if (recordSession.phase === 'recording') recordSession.notice = '화면이 숨겨져 녹음을 종료했습니다';
+        stopRecording(false);
+      }
+    }
+  });
+  window.addEventListener('beforeunload', function (e) {
+    var hasUnsavedResult = Object.keys(recordResults).some(function (key) {
+      return recordResults[key] && !recordResults[key].saved;
+    });
+    if (!recordSession && !hasUnsavedResult) return;
+    e.preventDefault();
+    e.returnValue = '';
   });
   window.addEventListener('pagehide', flushPendingCloudSave);
+  window.addEventListener('pagehide', function () {
+    if (recordSession) stopRecording(false);
+  });
 
   function reportAudioCacheError(message, e) {
     var detail = errCode(e);
@@ -2494,10 +3001,12 @@
     return code;
   }
   function clearAudioTracks() {
-    if (playing) {
-      playing = false;
-      stopSources();
+    try { recordPreview.pause(); } catch (e) {}
+    if (recordSession) {
+      if (recordSession.phase === 'recording') recordSession.notice = '오디오 초기화로 녹음을 종료했습니다';
+      stopRecording(false);
     }
+    pauseTimelinePlayback();
     playOff = 0;
     ['orig', 'mr'].forEach(function (k) {
       audioTokens[k]++;
