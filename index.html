@@ -200,9 +200,10 @@
   .queue .q { padding: 1px 6px; border: 1px solid var(--edge); border-radius: 4px; color: var(--muted); }
   .queue .q.first { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 700; }
 
-  .tl-wrap { position: relative; }
+  .tl-wrap { display: flex; gap: 6px; align-items: stretch; }
+  .tl-labels { position: relative; flex: none; width: 62px; }
   .tl-labels .lanebtn {
-    position: absolute; left: 6px; z-index: 2;
+    position: absolute; left: 0; right: 0; z-index: 2;
     font: inherit; font-size: 10.5px;
     padding: 2px 8px;
     border: 1px solid var(--edge); border-radius: 5px;
@@ -214,9 +215,11 @@
   .tl-labels .lanebtn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
   .timepane .tl-scroll {
     position: relative; overflow-x: auto;
+    flex: 1; min-width: 0;
     background: var(--paper);
     border: 1px solid var(--edge); border-radius: 8px;
-    height: 172px;
+    height: 184px;
+    overflow-y: hidden;
   }
   .tl-inner { position: relative; height: 100%; cursor: grab; touch-action: pan-y; }
   .tl-inner.panning { cursor: grabbing; }
@@ -235,8 +238,8 @@
   .gridlab input[type="number"]:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
   .tl-syls { position: absolute; top: 98px; left: 0; right: 0; bottom: 0; }
   .tl-syl {
-    position: absolute; top: 0; height: 100%;
-    display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-end;
+    position: absolute; bottom: 0;
+    display: flex; flex-direction: column; align-items: flex-start;
     padding-left: 3px; padding-bottom: 3px;
     border-left: 1px dashed var(--edge);
     cursor: grab;
@@ -248,7 +251,7 @@
   .tl-syl.now { border-left: 2px solid var(--accent); }
   .tl-syl.now .tch { color: var(--accent); }
   .tlx {
-    position: absolute; top: 2px; right: -7px;
+    position: absolute; top: -6px; right: -7px;
     width: 14px; height: 14px; border-radius: 50%;
     background: var(--edge); color: var(--ink);
     font-size: 9px; line-height: 14px; text-align: center;
@@ -339,17 +342,17 @@
     <div id="sheet" class="sheet"></div>
     <div id="timePane" class="timepane" hidden>
       <div class="tl-wrap">
+        <div class="tl-labels">
+          <button id="muteOrig" class="lanebtn" style="top:22px" title="클릭해서 켜고 끄기" disabled>원곡 🔊</button>
+          <button id="muteMr" class="lanebtn" style="top:64px" title="클릭해서 켜고 끄기" disabled>MR 🔊</button>
+        </div>
         <div class="tl-scroll" id="tlScroll">
           <div class="tl-inner" id="tlInner">
-            <canvas id="grid" height="170"></canvas>
+            <canvas id="grid" height="182"></canvas>
             <canvas id="wave" height="96"></canvas>
             <div id="tlSyls" class="tl-syls"></div>
             <div class="playhead" id="playhead"></div>
           </div>
-        </div>
-        <div class="tl-labels">
-          <button id="muteOrig" class="lanebtn" style="top:12px" title="클릭해서 켜고 끄기" disabled>원곡 🔊</button>
-          <button id="muteMr" class="lanebtn" style="top:54px" title="클릭해서 켜고 끄기" disabled>MR 🔊</button>
         </div>
       </div>
       <p class="help">
@@ -1234,7 +1237,7 @@
     g.style.width = (w || 1) + 'px';
     if (!duration || !st) return;
     var ctx = g.getContext('2d');
-    ctx.clearRect(0, 0, w, 170);
+    ctx.clearRect(0, 0, w, 182);
     ctx.fillStyle = cssVar('--muted') || '#888';
     var off = +doc.gridOff || 0;
     var k0 = Math.ceil((0 - off) / st);
@@ -1244,7 +1247,7 @@
       var m = ((k % 16) + 16) % 16;
       /* 마디(16칸)·박(4칸)·16비트 순으로 진하게 */
       ctx.globalAlpha = m === 0 ? 0.4 : (m % 4 === 0 ? 0.2 : 0.08);
-      ctx.fillRect(Math.round(t * pps), 0, 1, 170);
+      ctx.fillRect(Math.round(t * pps), 0, 1, 182);
     }
     ctx.globalAlpha = 1;
   }
