@@ -264,6 +264,21 @@
     pointer-events: none;
   }
 
+  .gate {
+    position: fixed; inset: 0; z-index: 50;
+    background: var(--bg);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .gate-card {
+    display: flex; flex-direction: column; align-items: center; gap: 14px;
+    background: var(--paper);
+    border: 1px solid var(--edge); border-radius: 10px;
+    padding: 40px 52px;
+  }
+  .gate-card strong { font-size: 18px; letter-spacing: .01em; }
+  .gate-card p { margin: 0; font-size: 12.5px; color: var(--muted); }
+  .gate-card .btn { font-size: 13.5px; padding: 8px 18px; }
+
   @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 
   @media print {
@@ -280,6 +295,15 @@
 </style>
 </head>
 <body>
+
+<div id="gate" class="gate">
+  <div class="gate-card">
+    <strong>가사 멜로디 표기</strong>
+    <p id="gateMsg">로그인 확인 중…</p>
+    <button class="btn primary" id="gateLogin" style="display:none">Google로 로그인</button>
+    <button class="btn" id="gateOffline" style="display:none">오프라인으로 계속</button>
+  </div>
+</div>
 
 <div class="app">
   <header class="toolbar">
@@ -394,6 +418,7 @@
       </p>
       <div class="iobtns">
         <button class="btn primary" id="fbLogin" disabled>Google로 로그인</button>
+        <button class="btn" id="fbLogout" disabled>로그아웃</button>
       </div>
       <details class="io">
         <summary>다른 Firebase 프로젝트 연결 (고급)</summary>
@@ -937,6 +962,7 @@
 
   document.addEventListener('keydown', function (e) {
     if (e.target && e.target.matches && e.target.matches('textarea, input, [contenteditable]')) return;
+    if (gateEl && !gateEl.hidden) return;
     var k = e.key;
     if (mode === 'time') {
       if (k === ' ') { playPause(); e.preventDefault(); }
@@ -1575,11 +1601,21 @@
   var FB_CDN = 'https://www.gstatic.com/firebasejs/10.14.1/';
   var fb = { mods: null, auth: null, db: null, stg: null, user: null, timer: null };
   var cloudStateEl = $('cloudState'), fbCfgTa = $('fbCfg');
+  var gateEl = $('gate'), gateMsg = $('gateMsg'), gateLogin = $('gateLogin'), gateOffline = $('gateOffline');
+
+  function gateShow(msg, canLogin, canOffline) {
+    gateEl.hidden = false;
+    gateMsg.textContent = msg;
+    gateLogin.style.display = canLogin ? '' : 'none';
+    gateOffline.style.display = canOffline ? '' : 'none';
+  }
+  function gateHide() { gateEl.hidden = true; }
 
   function cloudStatus(msg) { cloudStateEl.textContent = msg; }
   function fbBtns() {
     $('fbLogin').disabled = !fb.auth;
     $('fbLogin').textContent = fb.user ? '로그인됨 ✓' : 'Google로 로그인';
+    $('fbLogout').disabled = !fb.user;
   }
 
   function fbInit(cfg) {
@@ -1601,13 +1637,17 @@
         fb.user = u;
         fbBtns();
         if (u) {
+          gateHide();
           cloudStatus('로그인됨: ' + (u.displayName || u.email || u.uid.slice(0, 8)));
           pullDoc(true);
           setTimeout(audioAutoDown, 1500);
+        } else {
+          gateShow('구글 계정으로 로그인해야 사용할 수 있습니다.', true, false);
         }
       });
     }).catch(function (e) {
       cloudStatus('연결 실패');
+      gateShow('클라우드 연결에 실패했습니다. 네트워크를 확인하세요.', false, true);
       flash('Firebase SDK 로드 실패: ' + e);
     });
   }
@@ -1635,6 +1675,15 @@
     if (!fb.auth) return;
     fb.mods.au.signInWithPopup(fb.auth, new fb.mods.au.GoogleAuthProvider())
       .catch(function (e) { flash('로그인 실패: ' + ((e && e.code) || e)); });
+  });
+  gateLogin.addEventListener('click', function () {
+    if (!fb.auth) return;
+    fb.mods.au.signInWithPopup(fb.auth, new fb.mods.au.GoogleAuthProvider())
+      .catch(function (e) { gateMsg.textContent = '로그인 실패: ' + ((e && e.code) || e); });
+  });
+  gateOffline.addEventListener('click', gateHide);
+  $('fbLogout').addEventListener('click', function () {
+    if (fb.auth && fb.mods) fb.mods.au.signOut(fb.auth);
   });
 
   function fbDocRef() { return fb.mods.fs.doc(fb.db, 'users', fb.user.uid, 'docs', 'main'); }
