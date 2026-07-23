@@ -184,8 +184,6 @@
   }
   .tab.active { background: var(--paper); color: var(--ink); border-color: var(--accent); }
   .tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-  .btn.trk { color: var(--muted); }
-  .btn.trk.on { border-color: var(--accent); color: var(--accent); }
 
   .audioname {
     font-size: 12px; color: var(--muted);
@@ -198,14 +196,17 @@
   .queue .q.first { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 700; }
 
   .tl-wrap { position: relative; }
-  .tl-labels span {
-    position: absolute; left: 6px;
-    font-size: 10px; color: var(--muted);
-    background: var(--paper);
-    padding: 0 5px; border-radius: 3px;
-    pointer-events: none;
-    z-index: 2;
+  .tl-labels .lanebtn {
+    position: absolute; left: 6px; z-index: 2;
+    font: inherit; font-size: 10.5px;
+    padding: 2px 8px;
+    border: 1px solid var(--edge); border-radius: 5px;
+    background: var(--paper); color: var(--muted);
+    cursor: pointer;
   }
+  .tl-labels .lanebtn.on { border-color: var(--accent); color: var(--accent); }
+  .tl-labels .lanebtn:disabled { opacity: .4; cursor: default; }
+  .tl-labels .lanebtn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
   .timepane .tl-scroll {
     position: relative; overflow-x: auto;
     background: var(--paper);
@@ -300,10 +301,8 @@
     <div class="lyrics-row" id="timeControls" hidden>
       <label class="btn" for="fileOrig">원곡 불러오기</label>
       <input type="file" id="fileOrig" accept="audio/*" style="display:none">
-      <button class="btn trk" id="muteOrig" disabled>원곡 🔊</button>
       <label class="btn" for="fileMr">MR 불러오기</label>
       <input type="file" id="fileMr" accept="audio/*" style="display:none">
-      <button class="btn trk" id="muteMr" disabled>MR 🔊</button>
       <button class="btn" id="playBtn" disabled>▶ 재생</button>
       <span id="timeDisp" class="status" style="margin-left:0">0:00.0 / 0:00.0</span>
       <button class="btn" id="zoomOut">− 축소</button>
@@ -327,8 +326,8 @@
           </div>
         </div>
         <div class="tl-labels">
-          <span id="labOrig" style="top:13px">원곡</span>
-          <span id="labMr" style="top:56px">MR</span>
+          <button id="muteOrig" class="lanebtn" style="top:12px" title="클릭해서 켜고 끄기" disabled>원곡 🔊</button>
+          <button id="muteMr" class="lanebtn" style="top:54px" title="클릭해서 켜고 끄기" disabled>MR 🔊</button>
         </div>
       </div>
       <p class="help">
@@ -1048,8 +1047,6 @@
       btn.textContent = tr.label + ' ' + (tr.on ? '🔊' : '🔇');
       btn.title = tr.name || '';
     });
-    $('labOrig').style.opacity = tracks.orig.buffer ? 1 : 0.35;
-    $('labMr').style.opacity = tracks.mr.buffer ? 1 : 0.35;
     var names = [];
     if (tracks.orig.name) names.push('원곡: ' + tracks.orig.name);
     if (tracks.mr.name) names.push('MR: ' + tracks.mr.name);
