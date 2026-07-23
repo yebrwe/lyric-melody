@@ -2486,6 +2486,13 @@
     });
   }
   function isMissingAudio(e) { return errCode(e) === 'storage/object-not-found'; }
+  function audioReadError(e) {
+    var code = errCode(e);
+    if ((e && e.name === 'TypeError') || code === 'storage/unknown') {
+      return '네트워크/CORS 오류 (' + location.origin + ')';
+    }
+    return code;
+  }
   function clearAudioTracks() {
     if (playing) {
       playing = false;
@@ -2525,24 +2532,23 @@
           });
       }
       var r = audioRefOf(k, uid);
-      return Promise.all([fb.mods.st.getDownloadURL(r), fb.mods.st.getMetadata(r)])
+      return Promise.all([
+        fb.mods.st.getBlob(r, 200 * 1024 * 1024),
+        fb.mods.st.getMetadata(r)
+      ])
         .then(function (res) {
-          return fetch(res[0]).then(function (resp) {
-            if (!resp.ok) throw new Error('storage/download-' + resp.status);
-            return resp.blob();
-          }).then(function (blob) {
-            if (!current()) return false;
-            var name = (res[1].customMetadata && res[1].customMetadata.name) || ('클라우드 ' + k);
-            var remoteGeneration = metadataGeneration(res[1]);
-            audioRemoteGeneration[k] = remoteGeneration;
-            return loadTrack(k, blob, name, false, uid, generation, token).then(function (ok) {
-              if (!ok || !current()) return false;
-              return idbPutIf(userAudioKey(uid, k),
-                audioCacheRecord(blob, name, false, remoteGeneration), current
-              ).then(function () { return true; }).catch(function (e) {
-                if (current()) reportAudioCacheError('클라우드 오디오를 이 브라우저에 보관하지 못했습니다', e);
-                return true;
-              });
+          var blob = res[0], metadata = res[1];
+          if (!current()) return false;
+          var name = (metadata.customMetadata && metadata.customMetadata.name) || ('클라우드 ' + k);
+          var remoteGeneration = metadataGeneration(metadata);
+          audioRemoteGeneration[k] = remoteGeneration;
+          return loadTrack(k, blob, name, false, uid, generation, token).then(function (ok) {
+            if (!ok || !current()) return false;
+            return idbPutIf(userAudioKey(uid, k),
+              audioCacheRecord(blob, name, false, remoteGeneration), current
+            ).then(function () { return true; }).catch(function (e) {
+              if (current()) reportAudioCacheError('클라우드 오디오를 이 브라우저에 보관하지 못했습니다', e);
+              return true;
             });
           });
         }).catch(function (e) {
@@ -2556,14 +2562,14 @@
                   return audioUploadBlob(k, local.blob, local.name || tracks[k].label,
                     uid, generation, token, null);
                 }
-                cloudStatus('오디오 불러오기 오류: ' + errCode(e));
-                flash('오디오 불러오기 실패: ' + errCode(e));
+                cloudStatus('오디오 불러오기 오류: ' + audioReadError(e));
+                flash('오디오 불러오기 실패: ' + audioReadError(e));
                 return false;
               });
           }
           if (!isMissingAudio(e)) {
-            cloudStatus('오디오 불러오기 오류: ' + errCode(e));
-            flash('오디오 불러오기 실패: ' + errCode(e));
+            cloudStatus('오디오 불러오기 오류: ' + audioReadError(e));
+            flash('오디오 불러오기 실패: ' + audioReadError(e));
           }
           return false;
         });

@@ -40,3 +40,10 @@ Firebase CLI로 규칙을 배포할 때는 다음 명령을 사용합니다.
 ```bash
 firebase deploy --only firestore:rules,storage
 ```
+
+Storage 오디오를 브라우저에서 다운로드하려면 버킷 CORS도 한 번 적용합니다.
+
+```bash
+gcloud storage buckets update gs://lyric-d92bb.firebasestorage.app \
+  --cors-file=storage.cors.json
+```
