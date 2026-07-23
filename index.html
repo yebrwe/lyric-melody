@@ -150,6 +150,8 @@
     user-select: none; -webkit-user-select: none;
   }
   .cell svg { display: block; }
+  .cell.sustain { cursor: default; }
+  .cell.sustain .ch { color: var(--muted); }
   .ch {
     width: 100%;
     text-align: center;
@@ -229,6 +231,7 @@
       글자를 <b>클릭</b>하고 <b>↑ ↓</b>만 누르면 계단이 바로 쌓입니다 (마지막 음에서는 연음 자동 추가, 잘못 쌓았으면 Delete) ·
       중간 음은 선택 후 ↑ ↓ 또는 드래그로 방향 수정 · ← → 음 이동 · Enter 연음 추가 ·
       <b>1~9</b> 바이브레이션 숫자 지정, <b>0</b> 지우기 · 음이 1개인 글자는 아무 표시가 없습니다 ·
+      가사에 <b>-</b>를 입력하면 앞 글자의 음을 길게 끄는 표시가 됩니다 (16비트 한 칸 = - 하나) ·
       위의 <b>패턴 버튼</b>은 선택한 글자에 바로 적용되고, [＋ 현재 패턴 저장]으로 나만의 패턴을 추가할 수 있습니다
     </p>
     <details class="io">
@@ -269,8 +272,9 @@
     return String(text).split('\n').map(function (lineStr, li) {
       return Array.from(lineStr).map(function (ch, ci) {
         if (ch === ' ' || ch === '　') return { ch: ' ', space: true };
+        if (ch === '-' || ch === '－') return { ch: '-', sustain: true };
         var o = old && old[li] && old[li][ci];
-        if (o && !o.space && o.ch === ch) return o;
+        if (o && !o.space && !o.sustain && o.ch === ch) return o;
         return { ch: ch, notes: [newNote()] };
       });
     });
@@ -313,6 +317,7 @@
       if (!Array.isArray(line)) return [];
       return line.map(function (c) {
         if (!c || c.space) return { ch: ' ', space: true };
+        if (c.sustain) return { ch: '-', sustain: true };
         var raw = Array.isArray(c.notes) ? c.notes : [];
         var prevLv = null;
         var notes = raw.map(function (n, i) {
@@ -364,7 +369,7 @@
   function nonSpacePositions() {
     var arr = [];
     doc.lines.forEach(function (line, li) {
-      line.forEach(function (c, ci) { if (!c.space) arr.push({ li: li, ci: ci }); });
+      line.forEach(function (c, ci) { if (!c.space && !c.sustain) arr.push({ li: li, ci: ci }); });
     });
     return arr;
   }
@@ -431,9 +436,20 @@
       '<div class="ch">' + esc(cell.ch) + '</div></div>';
   }
 
+  /* 앞 글자의 마지막 음 높이를 그대로 이어 그리는 '길게 끌기' 칸.
+     lift = 바닥 기준 높이(px), 음수면 이을 선이 없어 대시 글자만 표시 */
+  function sustainHTML(lift) {
+    var w = 16, H = lift >= 0 ? lift + 8 : 8;
+    var y = H - 4 - (lift >= 0 ? lift : 0);
+    var line = lift >= 0
+      ? '<path class="contour" d="M 0 ' + y + ' L ' + w + ' ' + y + '"/>'
+      : '';
+    return '<div class="cell sustain" style="width:' + w + 'px"><svg width="' + w + '" height="' + H + '" viewBox="0 0 ' + w + ' ' + H + '">' + line + '</svg><div class="ch">-</div></div>';
+  }
+
   function render() {
     sheet.innerHTML = doc.lines.map(function (line, li) {
-      var parts = [], word = '', spaces = 0;
+      var parts = [], word = '', spaces = 0, lastGlyph = -1;
       var flushWord = function () {
         if (word) { parts.push('<div class="word">' + word + '</div>'); word = ''; }
       };
@@ -442,7 +458,16 @@
       };
       line.forEach(function (cell, ci) {
         if (cell.space) { flushWord(); spaces++; }
-        else { flushSpaces(); word += cellHTML(cell, li, ci); }
+        else if (cell.sustain) {
+          flushSpaces();
+          word += sustainHTML(lastGlyph);
+        }
+        else {
+          flushSpaces();
+          word += cellHTML(cell, li, ci);
+          var g = cellGeom(cell);
+          lastGlyph = cell.notes.length >= 2 ? (g.o[g.o.length - 1] - g.min) * STEP : -1;
+        }
       });
       flushWord(); flushSpaces();
       var inner = parts.length ? parts.join('') : '<div class="emptyline"></div>';
