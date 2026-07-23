@@ -211,7 +211,7 @@
     position: relative; overflow-x: auto;
     background: var(--paper);
     border: 1px solid var(--edge); border-radius: 8px;
-    height: 216px;
+    height: 172px;
   }
   .tl-inner { position: relative; height: 100%; }
   #grid { position: absolute; top: 0; left: 0; display: block; }
@@ -227,7 +227,7 @@
     background: var(--paper); color: var(--ink);
   }
   .gridlab input[type="number"]:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
-  .tl-syls { position: absolute; top: 100px; left: 0; right: 0; bottom: 0; }
+  .tl-syls { position: absolute; top: 98px; left: 0; right: 0; bottom: 0; }
   .tl-syl {
     position: absolute; top: 0; height: 100%;
     display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-end;
@@ -335,7 +335,7 @@
       <div class="tl-wrap">
         <div class="tl-scroll" id="tlScroll">
           <div class="tl-inner" id="tlInner">
-            <canvas id="grid" height="214"></canvas>
+            <canvas id="grid" height="170"></canvas>
             <canvas id="wave" height="96"></canvas>
             <div id="tlSyls" class="tl-syls"></div>
             <div class="playhead" id="playhead"></div>
@@ -1188,7 +1188,7 @@
     g.style.width = (w || 1) + 'px';
     if (!duration || !st) return;
     var ctx = g.getContext('2d');
-    ctx.clearRect(0, 0, w, 214);
+    ctx.clearRect(0, 0, w, 170);
     ctx.fillStyle = cssVar('--muted') || '#888';
     var off = +doc.gridOff || 0;
     var k0 = Math.ceil((0 - off) / st);
@@ -1198,7 +1198,7 @@
       var m = ((k % 16) + 16) % 16;
       /* 마디(16칸)·박(4칸)·16비트 순으로 진하게 */
       ctx.globalAlpha = m === 0 ? 0.4 : (m % 4 === 0 ? 0.2 : 0.08);
-      ctx.fillRect(Math.round(t * pps), 0, 1, 214);
+      ctx.fillRect(Math.round(t * pps), 0, 1, 170);
     }
     ctx.globalAlpha = 1;
   }
