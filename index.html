@@ -1312,9 +1312,12 @@
         if (el2) el2.classList.add('now');
       }
     }
-    if (playing) {
-      var vx = t * pps - tlScroll.scrollLeft, vw = tlScroll.clientWidth;
-      if (vx > vw * 0.6 || vx < 0) tlScroll.scrollLeft = Math.max(0, t * pps - vw * 0.35);
+    if (playing && !pan) {
+      /* 재생 헤드가 화면 45% 지점을 넘으면 그 자리에 고정한 채 매 프레임 부드럽게 따라감 */
+      var px = t * pps, vw = tlScroll.clientWidth;
+      if (px - tlScroll.scrollLeft > vw * 0.45) {
+        tlScroll.scrollLeft = Math.max(0, px - vw * 0.45);
+      }
     }
   }
   function rafLoop() {
