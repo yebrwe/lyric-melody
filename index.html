@@ -1563,7 +1563,7 @@
 
   /* ---------- 클라우드 동기화 (Firebase) ---------- */
 
-  var FB_CDN = 'https://www.gstatic.com/firebasejs/10.12.2/';
+  var FB_CDN = 'https://www.gstatic.com/firebasejs/10.14.1/';
   var fb = { mods: null, auth: null, db: null, stg: null, user: null, timer: null };
   var cloudStateEl = $('cloudState'), fbCfgTa = $('fbCfg');
 
@@ -1604,11 +1604,23 @@
     });
   }
 
+  /* 콘솔에서 복사한 JS 스니펫(주석·따옴표 없는 키 포함)도 통째로 붙여넣을 수 있게 관대하게 해석 */
+  function parseFbCfg(text) {
+    try { return JSON.parse(text); } catch (e) {}
+    var m = String(text).match(/\{[^{}]*apiKey[\s\S]*?\}/);
+    if (!m) return null;
+    var s = m[0]
+      .replace(/\/\/[^\n]*/g, '')
+      .replace(/,\s*\}/g, '}')
+      .replace(/([{,]\s*)([A-Za-z_$][\w$]*)\s*:/g, '$1"$2":')
+      .replace(/'/g, '"');
+    try { return JSON.parse(s); } catch (e) { return null; }
+  }
   $('fbConnect').addEventListener('click', function () {
-    var cfg;
-    try { cfg = JSON.parse(fbCfgTa.value); } catch (e) { flash('구성 JSON 형식이 올바르지 않습니다.'); return; }
-    if (!cfg || !cfg.apiKey || !cfg.projectId) { flash('apiKey / projectId가 없는 구성입니다.'); return; }
+    var cfg = parseFbCfg(fbCfgTa.value);
+    if (!cfg || !cfg.apiKey || !cfg.projectId) { flash('구성을 해석할 수 없습니다. firebaseConfig 부분을 붙여넣어 주세요.'); return; }
     try { localStorage.setItem('fb-config', JSON.stringify(cfg)); } catch (e) {}
+    fbCfgTa.value = JSON.stringify(cfg);
     fbInit(cfg);
   });
   $('fbLogin').addEventListener('click', function () {
