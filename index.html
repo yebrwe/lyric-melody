@@ -352,6 +352,7 @@
       <label class="gridlab">BPM <input type="number" id="bpmIn" min="30" max="300" step="0.01" placeholder="120"></label>
       <label class="gridlab">첫 박 <input type="number" id="offIn" min="0" step="0.01" placeholder="0.00">s</label>
       <label class="gridlab" title="글자를 찍거나 드래그하면 가장 가까운 16비트 칸 경계에 자동으로 딱 붙여줍니다"><input type="checkbox" id="snapChk" checked> 격자 스냅</label>
+      <button class="btn" id="homeBtn" title="재생 위치를 맨 처음으로 (Home)">⏮ 처음</button>
       <button class="btn" id="playBtn" disabled>▶ 재생</button>
       <span id="timeDisp" class="status" style="margin-left:0">0:00.0 / 0:00.0</span>
       <button class="btn" id="zoomOut">− 축소</button>
@@ -973,6 +974,7 @@
       else if (/^[0-9]$/.test(k)) { tlVib(+k); }
       else if (k === 'ArrowLeft') { seekTo(curTime() - 2); e.preventDefault(); }
       else if (k === 'ArrowRight') { seekTo(curTime() + 2); e.preventDefault(); }
+      else if (k === 'Home') { seekTo(0); tlScroll.scrollLeft = 0; e.preventDefault(); }
       return;
     }
     if (k === 'ArrowLeft') { moveSel(-1); e.preventDefault(); }
@@ -1212,6 +1214,10 @@
     if (f) loadTrack('mr', f, f.name, true);
   });
   playBtn.addEventListener('click', playPause);
+  $('homeBtn').addEventListener('click', function () {
+    seekTo(0);
+    tlScroll.scrollLeft = 0;
+  });
 
   function drawWave() {
     var duration = dur();
