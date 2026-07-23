@@ -384,6 +384,22 @@
         <button id="importBtn" class="btn">붙여넣은 JSON 가져오기</button>
       </div>
     </details>
+    <details class="io" id="cloudBox">
+      <summary>☁ 클라우드 동기화 (Firebase) — <span id="cloudState">연결 안 됨</span></summary>
+      <p class="help">
+        Firebase 콘솔의 웹 앱 구성(JSON)을 붙여넣고 [연결] → [Google로 로그인] 하세요. 최초 한 번 [악보 올리기]나 [악보 불러오기]를 하면
+        이후에는 수정할 때마다 자동으로 클라우드에 저장되고, 다른 기기에서 로그인하면 이어서 작업할 수 있습니다. 오디오(원곡/MR)는 버튼으로 올리고 내려받습니다.
+      </p>
+      <textarea id="fbCfg" rows="4" spellcheck="false" placeholder='{"apiKey":"...","authDomain":"...","projectId":"...","storageBucket":"...","appId":"..."}'></textarea>
+      <div class="iobtns">
+        <button class="btn" id="fbConnect">연결</button>
+        <button class="btn" id="fbLogin" disabled>Google로 로그인</button>
+        <button class="btn" id="fbPush" disabled>악보 올리기</button>
+        <button class="btn" id="fbPull" disabled>악보 불러오기</button>
+        <button class="btn" id="fbAudioUp" disabled>오디오 올리기</button>
+        <button class="btn" id="fbAudioDown" disabled>오디오 내려받기</button>
+      </div>
+    </details>
   </main>
 </div>
 
@@ -518,7 +534,9 @@
     return sampleDoc();
   }
   function save() {
+    doc.mtime = Date.now();
     try { localStorage.setItem(KEY, JSON.stringify(doc)); } catch (e) {}
+    cloudAutoSave();
   }
 
   var doc = load();
@@ -1145,6 +1163,7 @@
         if (playing) playPause();
         tracks[k].buffer = ab;
         tracks[k].name = name;
+        tracks[k].blob = blob;
         tracks[k].peaks = buildPeaks(ab);
         updateTrackUI();
         layoutTimeline();
@@ -1541,6 +1560,151 @@
   idbGet('audio-mr', function (res) {
     if (res && res.blob) loadTrack('mr', res.blob, res.name || 'MR', false);
   });
+
+  /* ---------- 클라우드 동기화 (Firebase) ---------- */
+
+  var FB_CDN = 'https://www.gstatic.com/firebasejs/10.12.2/';
+  var fb = { mods: null, auth: null, db: null, stg: null, user: null, timer: null };
+  var cloudStateEl = $('cloudState'), fbCfgTa = $('fbCfg');
+
+  function cloudStatus(msg) { cloudStateEl.textContent = msg; }
+  function fbBtns() {
+    $('fbLogin').disabled = !fb.auth;
+    ['fbPush', 'fbPull', 'fbAudioUp', 'fbAudioDown'].forEach(function (id) {
+      $(id).disabled = !fb.user;
+    });
+  }
+
+  function fbInit(cfg) {
+    cloudStatus('SDK 불러오는 중…');
+    Promise.all([
+      import(FB_CDN + 'firebase-app.js'),
+      import(FB_CDN + 'firebase-auth.js'),
+      import(FB_CDN + 'firebase-firestore.js'),
+      import(FB_CDN + 'firebase-storage.js')
+    ]).then(function (m) {
+      fb.mods = { app: m[0], au: m[1], fs: m[2], st: m[3] };
+      var app = fb.mods.app.initializeApp(cfg);
+      fb.auth = fb.mods.au.getAuth(app);
+      fb.db = fb.mods.fs.getFirestore(app);
+      fb.stg = fb.mods.st.getStorage(app);
+      cloudStatus('연결됨 — 로그인하세요');
+      fbBtns();
+      fb.mods.au.onAuthStateChanged(fb.auth, function (u) {
+        fb.user = u;
+        fbBtns();
+        if (u) {
+          cloudStatus('로그인됨: ' + (u.displayName || u.email || u.uid.slice(0, 8)));
+          if (localStorage.getItem('fb-auto') === '1') pullDoc(true);
+        }
+      });
+    }).catch(function (e) {
+      cloudStatus('연결 실패');
+      flash('Firebase SDK 로드 실패: ' + e);
+    });
+  }
+
+  $('fbConnect').addEventListener('click', function () {
+    var cfg;
+    try { cfg = JSON.parse(fbCfgTa.value); } catch (e) { flash('구성 JSON 형식이 올바르지 않습니다.'); return; }
+    if (!cfg || !cfg.apiKey || !cfg.projectId) { flash('apiKey / projectId가 없는 구성입니다.'); return; }
+    try { localStorage.setItem('fb-config', JSON.stringify(cfg)); } catch (e) {}
+    fbInit(cfg);
+  });
+  $('fbLogin').addEventListener('click', function () {
+    if (!fb.auth) return;
+    fb.mods.au.signInWithPopup(fb.auth, new fb.mods.au.GoogleAuthProvider())
+      .catch(function (e) { flash('로그인 실패: ' + ((e && e.code) || e)); });
+  });
+
+  function fbDocRef() { return fb.mods.fs.doc(fb.db, 'users', fb.user.uid, 'docs', 'main'); }
+
+  function pushDoc(silent) {
+    if (!fb.user) return;
+    cloudStatus('저장 중…');
+    fb.mods.fs.setDoc(fbDocRef(), {
+      data: JSON.stringify(doc),
+      mtime: doc.mtime || Date.now(),
+      updatedAt: fb.mods.fs.serverTimestamp()
+    }).then(function () {
+      try { localStorage.setItem('fb-auto', '1'); } catch (e) {}
+      cloudStatus('동기화됨 ' + new Date().toTimeString().slice(0, 5));
+      if (!silent) flash('악보를 클라우드에 올렸습니다.');
+    }).catch(function (e) {
+      cloudStatus('저장 오류');
+      if (!silent) flash('클라우드 저장 실패: ' + ((e && e.code) || e));
+    });
+  }
+  function pullDoc(autoOnly) {
+    if (!fb.user) return;
+    fb.mods.fs.getDoc(fbDocRef()).then(function (snap) {
+      if (!snap.exists()) {
+        if (!autoOnly) flash('클라우드에 저장된 악보가 아직 없습니다. 먼저 [악보 올리기]를 하세요.');
+        return;
+      }
+      var pay = snap.data();
+      if (autoOnly && !(pay.mtime > (doc.mtime || 0))) return;
+      var d = normalizeDoc(JSON.parse(pay.data));
+      if (!d) { if (!autoOnly) flash('클라우드 악보를 해석할 수 없습니다.'); return; }
+      doc = d;
+      lyricsIn.value = doc.lyrics || '';
+      sel = firstSel();
+      tlSel = null;
+      try { localStorage.setItem(KEY, JSON.stringify(doc)); } catch (e) {}
+      try { localStorage.setItem('fb-auto', '1'); } catch (e) {}
+      render();
+      if (mode === 'time') layoutTimeline();
+      cloudStatus('동기화됨 ' + new Date().toTimeString().slice(0, 5));
+      flash('클라우드 악보를 불러왔습니다.');
+    }).catch(function (e) { flash('클라우드 불러오기 실패: ' + ((e && e.code) || e)); });
+  }
+  $('fbPush').addEventListener('click', function () { pushDoc(false); });
+  $('fbPull').addEventListener('click', function () { pullDoc(false); });
+
+  function cloudAutoSave() {
+    if (!fb.user || localStorage.getItem('fb-auto') !== '1') return;
+    if (fb.timer) clearTimeout(fb.timer);
+    fb.timer = setTimeout(function () { pushDoc(true); }, 1500);
+  }
+
+  function audioRefOf(k) { return fb.mods.st.ref(fb.stg, 'users/' + fb.user.uid + '/audio-' + k); }
+  $('fbAudioUp').addEventListener('click', function () {
+    if (!fb.user) return;
+    var ks = ['orig', 'mr'].filter(function (k) { return tracks[k].blob; });
+    if (!ks.length) { flash('올릴 오디오가 없습니다. 먼저 타임라인 탭에서 불러오세요.'); return; }
+    flash('오디오 올리는 중… (' + ks.length + '개)');
+    Promise.all(ks.map(function (k) {
+      return fb.mods.st.uploadBytes(audioRefOf(k), tracks[k].blob, {
+        contentType: tracks[k].blob.type || 'audio/mpeg',
+        customMetadata: { name: tracks[k].name || '' }
+      });
+    })).then(function () { flash('오디오 업로드 완료: ' + ks.join(', ')); })
+      .catch(function (e) { flash('오디오 업로드 실패: ' + ((e && e.code) || e)); });
+  });
+  $('fbAudioDown').addEventListener('click', function () {
+    if (!fb.user) return;
+    flash('오디오 내려받는 중…');
+    ['orig', 'mr'].forEach(function (k) {
+      var r = audioRefOf(k);
+      Promise.all([fb.mods.st.getDownloadURL(r), fb.mods.st.getMetadata(r)])
+        .then(function (res) {
+          return fetch(res[0]).then(function (resp) { return resp.blob(); }).then(function (b) {
+            var nm = (res[1].customMetadata && res[1].customMetadata.name) || ('클라우드 ' + k);
+            loadTrack(k, b, nm, true);
+          });
+        })
+        .catch(function () { /* 클라우드에 없는 트랙은 건너뜀 */ });
+    });
+  });
+
+  (function () {
+    var savedCfg = null;
+    try { savedCfg = JSON.parse(localStorage.getItem('fb-config')); } catch (e) {}
+    if (savedCfg) {
+      fbCfgTa.value = JSON.stringify(savedCfg);
+      fbInit(savedCfg);
+    }
+  })();
 
   /* ---------- 시작 ---------- */
 
