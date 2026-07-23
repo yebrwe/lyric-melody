@@ -6,3 +6,9 @@ lyric-melody.html
 
 .vercel
 .env*
+
+# 음원 파일 (MR 등) — 공개 저장소에 올리지 않음
+*.mp3
+*.wav
+*.m4a
+*.webm
