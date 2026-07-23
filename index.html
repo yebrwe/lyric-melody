@@ -277,27 +277,33 @@
   }
 
   function sampleDoc() {
-    var d = { lyrics: '뭔가 잘못됐어 내 마음이' };
+    var d = {
+      lyrics: [
+        '땅은 하늘이 되고 지구가 달을 돌고',
+        '옳은 건 다 틀린 게 되고 모든 게 다 제멋대로 움직이고 있어',
+        '시간은 끝없이 영원해지기도 눈 깜짝할 사이에 사라지기도 해',
+        '네가 나타났을 때 전부 뒤바뀐 거야',
+        '뭔가 잘못됐어 단단히 설명할 수도 없이',
+        '모든 게 달라진 거야 너를 처음 본 그 순간',
+        '네가 내 이름 불러줄 때 믿어왔던 모든 게 무너진 거야',
+        '내가 왜 이런지 모르겠어 네가 말하는 세상',
+        '이젠 그게 맞는 거야 내겐 그게 전부야',
+        '넌 내 세상이니까 어떤 이유도 필요 없는 거야',
+        '너는 날 뒤흔들고 내 우주를 조종해',
+        '흐트러진 중력에 힘을 빼앗긴 채 어디로 가야 할지',
+        '길을 잃은 것만 같아 뭔가 잘못됐어 단단히',
+        '설명할 수도 없이 모든 게 달라진 거야',
+        '너를 처음 본 그 순간 네가 내 이름 불러줄 때 믿어왔던',
+        '모든 게 무너진 거야 내가 왜 이런지 모르겠어',
+        '눈앞이 아득해져 어긋나는 초점 사이로',
+        '선명히 다가오는 너 뭔가 잘못됐어 내 마음이',
+        '벗어날 수도 없이 사랑에 빠져버렸어',
+        '네가 내게 온 그 순간부터 난 너에게 달렸어',
+        '이제부터 모든 게 달라질 거야',
+        '난 네 사람이니까 넌 내 세상이니까'
+      ].join('\n')
+    };
     d.lines = linesFrom(d.lyrics);
-    var m = [
-      [newNote(), newNote(1)],            /* 뭔: 위 계단 */
-      [newNote()],                        /* 가: 표시 없음 */
-      null,
-      [newNote(), newNote(1)],            /* 잘: 위 계단 */
-      [newNote(), newNote(-1)],           /* 못: 아래 계단 */
-      [newNote(), newNote(1), newNote(-1)], /* 됐: 올랐다 내림 */
-      [newNote(0, 2)],                    /* 어: 바이브레이션 숫자만 */
-      null,
-      [newNote(), newNote(1)],            /* 내 */
-      null,
-      [newNote()],                        /* 마 */
-      [newNote(), newNote(-1)],           /* 음 */
-      [newNote(), newNote(1, 3)]          /* 이: 위 계단 + 바이브 3 */
-    ];
-    m.forEach(function (notes, i) {
-      var cell = d.lines[0][i];
-      if (notes && cell && !cell.space) cell.notes = notes;
-    });
     return d;
   }
 
@@ -340,7 +346,11 @@
   function load() {
     try {
       var d = normalizeDoc(JSON.parse(localStorage.getItem(KEY)));
-      if (d) return d;
+      if (d) {
+        /* 예전 한 줄짜리 예시 문서면 전체 가사로 교체 */
+        if (d.lyrics === '뭔가 잘못됐어 내 마음이') return sampleDoc();
+        return d;
+      }
     } catch (e) {}
     return sampleDoc();
   }
@@ -732,7 +742,7 @@
     lyricsIn.value = doc.lyrics;
     sel = firstSel();
     update();
-    flash('예시 상태로 되돌렸습니다.');
+    flash('전체 가사 초기 상태로 되돌렸습니다.');
   });
 
   $('exportBtn').addEventListener('click', function () {
