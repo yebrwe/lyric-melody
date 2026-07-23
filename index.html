@@ -49,7 +49,12 @@
     --accent-soft: rgba(122, 160, 245, .16);
   }
 
-  * { box-sizing: border-box; }
+  * { box-sizing: border-box; scrollbar-width: thin; scrollbar-color: var(--edge) transparent; }
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--edge); border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+  ::-webkit-scrollbar-corner { background: transparent; }
   body {
     margin: 0;
     background: var(--bg);
@@ -213,7 +218,8 @@
     border: 1px solid var(--edge); border-radius: 8px;
     height: 172px;
   }
-  .tl-inner { position: relative; height: 100%; }
+  .tl-inner { position: relative; height: 100%; cursor: grab; touch-action: pan-y; }
+  .tl-inner.panning { cursor: grabbing; }
   #grid { position: absolute; top: 0; left: 0; display: block; }
   #wave { position: absolute; top: 0; left: 0; display: block; }
   #timeControls { flex-wrap: wrap; }
@@ -359,6 +365,7 @@
       글자를 <b>클릭</b>하고 <b>↑ ↓</b>만 누르면 계단이 바로 쌓입니다 (마지막 음에서는 연음 자동 추가, 잘못 쌓았으면 Delete) ·
       중간 음은 선택 후 ↑ ↓ 또는 드래그로 방향 수정 · ← → 음 이동 · Enter 연음 추가 ·
       <b>1~9</b> 바이브레이션 숫자 지정, <b>0</b> 지우기 · 음이 1개인 글자는 아무 표시가 없습니다 ·
+      같은 방향 연속 계단은 <b>3음까지</b>만 가능합니다 (방향이 바뀌면 다시 이어짐) ·
       가사에 <b>-</b>를 입력하면 앞 글자의 음을 길게 끄는 표시가 됩니다 (16비트 한 칸 = - 하나) ·
       위의 <b>패턴 버튼</b>은 선택한 글자에 바로 적용되고, [＋ 현재 패턴 저장]으로 나만의 패턴을 추가할 수 있습니다
     </p>
@@ -395,6 +402,18 @@
      글자(cell): { ch, notes: [note, ...] }  — 음은 항상 1개 이상, 1개면 계단을 그리지 않음 */
 
   function newNote(d, vn) { return { d: d || 0, vn: vn || 0 }; }
+
+  /* 같은 방향으로 4음(연속 3계단) 이상 이어지는지 — 신체 구조상 불가 규칙 */
+  function dirRunTooLong(notes) {
+    var run = 0, last = 0;
+    for (var i = 1; i < notes.length; i++) {
+      var d = notes[i].d < 0 ? -1 : 1;
+      run = d === last ? run + 1 : 1;
+      last = d;
+      if (run >= 3) return true;
+    }
+    return false;
+  }
 
   function linesFrom(text, old) {
     return String(text).split('\n').map(function (lineStr, li) {
@@ -652,9 +671,20 @@
     if (sel.ni === cell.notes.length - 1) {
       /* 마지막 음에서 ↑/↓ → 그 방향으로 연음 자동 추가 */
       cell.notes.push(newNote(d));
+      if (dirRunTooLong(cell.notes)) {
+        cell.notes.pop();
+        flash('같은 방향으로는 3음까지만 이어집니다 (신체 구조상 한계).');
+        return;
+      }
       sel.ni = cell.notes.length - 1;
     } else if (sel.ni > 0) {
+      var prevD = cell.notes[sel.ni].d;
       cell.notes[sel.ni].d = d;
+      if (dirRunTooLong(cell.notes)) {
+        cell.notes[sel.ni].d = prevD;
+        flash('같은 방향으로는 3음까지만 이어집니다 (신체 구조상 한계).');
+        return;
+      }
     } else {
       flash('첫 음은 기준이라 방향이 없습니다.');
       return;
@@ -666,6 +696,15 @@
     var cell = cellAt(sel);
     if (!cell || cell.space) return;
     cell.notes.splice(sel.ni + 1, 0, newNote(1));
+    if (dirRunTooLong(cell.notes)) {
+      cell.notes[sel.ni + 1].d = -1;
+      if (dirRunTooLong(cell.notes)) {
+        cell.notes.splice(sel.ni + 1, 1);
+        flash('같은 방향으로는 3음까지만 이어집니다 (신체 구조상 한계).');
+        update();
+        return;
+      }
+    }
     sel.ni++;
     update();
   }
@@ -850,8 +889,15 @@
     var dy = drag.y0 - e.clientY;
     if (Math.abs(dy) < 5) return;
     var nd = dy > 0 ? 1 : -1;
-    var nt = cellAt(sel).notes[sel.ni];
-    if (nt.d !== nd) { nt.d = nd; drag.moved = true; render(); }
+    var cell = cellAt(sel);
+    var nt = cell.notes[sel.ni];
+    if (nt.d !== nd) {
+      var prevD = nt.d;
+      nt.d = nd;
+      if (dirRunTooLong(cell.notes)) { nt.d = prevD; return; }
+      drag.moved = true;
+      render();
+    }
   }
   function onUp() {
     window.removeEventListener('pointermove', onMove);
@@ -1288,11 +1334,33 @@
   }
   tapBtn.addEventListener('click', tapPlace);
 
-  waveCv.addEventListener('pointerdown', function (e) {
+  /* 빈 곳 드래그 = 가로 스크롤(팬), 짧은 클릭 = 그 위치로 이동 */
+  var pan = null;
+  tlInner.addEventListener('pointerdown', function (e) {
+    if (e.target.closest && e.target.closest('.tl-syl')) return;
     if (!anyLoaded()) return;
-    var rect = tlInner.getBoundingClientRect();
-    seekTo((e.clientX - rect.left) / pps);
+    pan = { x0: e.clientX, s0: tlScroll.scrollLeft, moved: false };
+    window.addEventListener('pointermove', panMove);
+    window.addEventListener('pointerup', panUp, { once: true });
+    e.preventDefault();
   });
+  function panMove(e) {
+    if (!pan) return;
+    if (Math.abs(e.clientX - pan.x0) > 4) {
+      pan.moved = true;
+      tlInner.classList.add('panning');
+    }
+    if (pan.moved) tlScroll.scrollLeft = pan.s0 - (e.clientX - pan.x0);
+  }
+  function panUp(e) {
+    window.removeEventListener('pointermove', panMove);
+    tlInner.classList.remove('panning');
+    if (pan && !pan.moved) {
+      var rect = tlInner.getBoundingClientRect();
+      seekTo((e.clientX - rect.left) / pps);
+    }
+    pan = null;
+  }
 
   var tlDrag = null;
   tlSyls.addEventListener('pointerdown', function (e) {
@@ -1361,9 +1429,20 @@
     if (!c) { flash('타임라인의 글자를 먼저 클릭하세요.'); return; }
     if (tlSel.ni === c.notes.length - 1) {
       c.notes.push(newNote(d));
+      if (dirRunTooLong(c.notes)) {
+        c.notes.pop();
+        flash('같은 방향으로는 3음까지만 이어집니다 (신체 구조상 한계).');
+        return;
+      }
       tlSel.ni = c.notes.length - 1;
     } else if (tlSel.ni > 0) {
+      var prevD = c.notes[tlSel.ni].d;
       c.notes[tlSel.ni].d = d;
+      if (dirRunTooLong(c.notes)) {
+        c.notes[tlSel.ni].d = prevD;
+        flash('같은 방향으로는 3음까지만 이어집니다 (신체 구조상 한계).');
+        return;
+      }
     } else {
       flash('첫 음은 기준이라 방향이 없습니다.');
       return;
