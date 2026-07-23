@@ -1345,7 +1345,20 @@
     }).join('');
     lastNowKey = '';
   }
-  function layoutTimeline() { gridInit(); drawGrid(); drawWave(); renderTlSyls(); renderQueue(); updatePlayhead(true); }
+  /* 이미 겹쳐 저장된 글자들을 최소 간격으로 벌림 (규칙 도입 전 데이터 정리) */
+  function fixOverlaps() {
+    var st = gridStep() || 0.125;
+    var pl = placedList();
+    var changed = false;
+    for (var i = 1; i < pl.length; i++) {
+      if (pl[i].cell.t < pl[i - 1].cell.t + st * 0.9) {
+        pl[i].cell.t = Math.round((pl[i - 1].cell.t + st) * 1000) / 1000;
+        changed = true;
+      }
+    }
+    if (changed) save();
+  }
+  function layoutTimeline() { gridInit(); fixOverlaps(); drawGrid(); drawWave(); renderTlSyls(); renderQueue(); updatePlayhead(true); }
 
   function updatePlayhead(force) {
     var duration = dur();
@@ -1387,7 +1400,7 @@
 
   /* 격자 한 칸에는 글자 하나 — 동시에 두 글자를 말할 수 없음 */
   function slotTaken(t, li, ci) {
-    var st = gridStep() || 0.05;
+    var st = gridStep() || 0.125;
     var pl = placedList();
     for (var i = 0; i < pl.length; i++) {
       var p = pl[i];
@@ -1401,13 +1414,9 @@
     var q = queueList()[0];
     if (!q) { flash('모든 글자가 이미 배치됐습니다.'); return; }
     var tt = curTime();
-    if (snapChk.checked) {
-      tt = snapT(tt);
-      var st = gridStep();
-      if (st) {
-        while (slotTaken(tt, q.li, q.ci)) tt += st;  /* 차 있으면 다음 빈 칸으로 */
-      }
-    }
+    if (snapChk.checked) tt = snapT(tt);
+    var st = gridStep() || 0.125;
+    while (slotTaken(tt, q.li, q.ci)) tt += st;  /* 차 있으면 다음 빈 칸으로 (격자 없어도 최소 간격) */
     doc.lines[q.li][q.ci].t = Math.round(tt * 1000) / 1000;
     save();
     renderTlSyls();
@@ -1490,10 +1499,8 @@
   function tlMove(e) {
     if (!tlDrag || !tlSel) return;
     var nt = clamp(tlDrag.t0 + (e.clientX - tlDrag.x0) / pps, 0, dur() || 1e9);
-    if (snapChk.checked) {
-      nt = snapT(nt);
-      if (slotTaken(nt, tlSel.li, tlSel.ci)) return;  /* 차 있는 칸으로는 이동 불가 */
-    }
+    if (snapChk.checked) nt = snapT(nt);
+    if (slotTaken(nt, tlSel.li, tlSel.ci)) return;  /* 차 있는 칸/간격 안으로는 이동 불가 */
     doc.lines[tlSel.li][tlSel.ci].t = Math.round(nt * 1000) / 1000;
     tlDrag.moved = true;
     var el = tlSyls.querySelector('.tl-syl[data-li="' + tlSel.li + '"][data-ci="' + tlSel.ci + '"]');
