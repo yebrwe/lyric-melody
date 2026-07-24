@@ -934,15 +934,17 @@
     return { o: o, min: min, H: H, w: w };
   }
 
-  function glyphSVG(cell, selNi) {
+  /* alignLeft: 타임라인용 — 계단·숫자를 가운데가 아니라 글자 시작점(왼쪽) 기준으로 그림 */
+  function glyphSVG(cell, selNi, alignLeft) {
     var notes = cell.notes, n = notes.length;
     var g = cellGeom(cell);
     var head = '<svg width="' + g.w + '" height="' + g.H + '" viewBox="0 0 ' + g.w + ' ' + g.H + '">';
     var body = '', selD = '', extras = '';
     var yOf = function (i) { return g.H - 4 - (g.o[i] - g.min) * STEP; };
+    var base = alignLeft ? 2 : (g.w - n * NOTE_W) / 2;
 
     if (n >= 2) {
-      var x0 = (g.w - n * NOTE_W) / 2, d = '', prevY = null;
+      var x0 = base, d = '', prevY = null;
       notes.forEach(function (nt, i) {
         var xs = x0 + i * NOTE_W, xe = xs + NOTE_W, y = yOf(i);
         d += (i === 0 ? 'M ' : 'L ') + xs + ' ' + y + ' L ' + xe + ' ' + y;
@@ -959,9 +961,9 @@
       if (!(nt.vn > 0)) return;
       var cx, y = yOf(i);
       if (n >= 2) {
-        cx = (g.w - n * NOTE_W) / 2 + i * NOTE_W + NOTE_W / 2;
+        cx = base + i * NOTE_W + NOTE_W / 2;
       } else {
-        cx = g.w / 2;
+        cx = alignLeft ? 9 : g.w / 2;
       }
       extras += '<text class="vib' + (i === selNi ? ' selv' : '') + '" x="' + cx + '" y="' + (y - 5) + '">' + nt.vn + '</text>';
     });
@@ -2481,17 +2483,25 @@
     if (!duration || !st) return;
     var ctx = g.getContext('2d');
     ctx.clearRect(0, 0, w, 182);
-    ctx.fillStyle = cssVar('--muted') || '#888';
+    ctx.strokeStyle = cssVar('--muted') || '#888';
+    ctx.lineWidth = 1;
     var off = +doc.gridOff || 0;
     var k0 = Math.ceil((0 - off) / st);
     for (var k = k0; ; k++) {
       var t = off + k * st;
       if (t > duration) break;
       var m = ((k % 16) + 16) % 16;
-      /* 마디(16칸)·박(4칸)·16비트 순으로 진하게 */
-      ctx.globalAlpha = m === 0 ? 0.4 : (m % 4 === 0 ? 0.2 : 0.08);
-      ctx.fillRect(Math.round(t * pps), 0, 1, 182);
+      /* 모눈종이식: 마디 = 실선, 박 = 긴 점선, 16비트 = 잔점선 */
+      if (m === 0) { ctx.setLineDash([]); ctx.globalAlpha = 0.5; }
+      else if (m % 4 === 0) { ctx.setLineDash([6, 3]); ctx.globalAlpha = 0.35; }
+      else { ctx.setLineDash([2, 3]); ctx.globalAlpha = 0.22; }
+      var x = Math.round(t * pps) + 0.5;
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, 182);
+      ctx.stroke();
     }
+    ctx.setLineDash([]);
     ctx.globalAlpha = 1;
   }
 
@@ -2525,7 +2535,7 @@
       return '<div class="tl-syl' + (isSel ? ' sel' : '') + '" data-li="' + p.li + '" data-ci="' + p.ci +
         '" style="left:' + (p.cell.t * pps) + 'px">' +
         (isSel ? '<span class="tlx" title="배치 해제 (Shift+Delete)">✕</span>' : '') +
-        glyphSVG(p.cell, isSel ? tlSel.ni : -1) +
+        glyphSVG(p.cell, isSel ? tlSel.ni : -1, true) +
         '<div class="tch">' + esc(p.cell.ch) + '</div></div>';
     }).join('');
     lastNowKey = '';
@@ -2681,8 +2691,8 @@
     var rect = el.getBoundingClientRect();
     var n = cell.notes.length, ni = 0;
     if (n > 1) {
-      var x0 = (rect.width - n * NOTE_W) / 2;
-      ni = clamp(Math.floor((e.clientX - rect.left - x0) / NOTE_W), 0, n - 1);
+      /* 왼쪽 정렬 글리프: padding 3px + 계단 시작 2px */
+      ni = clamp(Math.floor((e.clientX - rect.left - 5) / NOTE_W), 0, n - 1);
     }
     tlSel = { li: li, ci: ci, ni: ni };
     tlDrag = { x0: e.clientX, t0: cell.t, moved: false };
