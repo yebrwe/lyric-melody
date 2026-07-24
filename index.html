@@ -1700,7 +1700,15 @@
     recordBtn = $('recordBtn'), recordMix = $('recordMix'), recordStatus = $('recordStatus'),
     recordPreview = $('recordPreview'), recordDownload = $('recordDownload'),
     recordDelete = $('recordDelete'), recordAnnounce = $('recordAnnounce');
-  var pps = 60, tlSel = null, rafId = null, lastNowKey = '';
+  /* 트랙 배율(px/초): 기본은 한 단계 확대(120), 조작한 배율은 기억 */
+  var pps = (function () {
+    try {
+      var v = +localStorage.getItem('tl-pps');
+      if (v >= 15 && v <= 240) return v;
+    } catch (e) {}
+    return 120;
+  })();
+  var tlSel = null, rafId = null, lastNowKey = '';
 
   var idbOpenPromise = null;
   var idbWriteChains = {};
@@ -2739,8 +2747,13 @@
     tlDrag = null;
   }
 
-  $('zoomIn').addEventListener('click', function () { pps = Math.min(240, pps * 2); layoutTimeline(); });
-  $('zoomOut').addEventListener('click', function () { pps = Math.max(15, pps / 2); layoutTimeline(); });
+  function setPps(v) {
+    pps = v;
+    try { localStorage.setItem('tl-pps', String(pps)); } catch (e) {}
+    layoutTimeline();
+  }
+  $('zoomIn').addEventListener('click', function () { setPps(Math.min(240, pps * 2)); });
+  $('zoomOut').addEventListener('click', function () { setPps(Math.max(15, pps / 2)); });
 
   var clearArmed = false, clearBtn = $('clearTimes');
   clearBtn.addEventListener('click', function () {
