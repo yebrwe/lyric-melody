@@ -1,0 +1,10 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
+flask
+gunicorn
+firebase-admin
+yt-dlp
+torch
+torchaudio
+demucs
+numpy
+soundfile

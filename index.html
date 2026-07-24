@@ -308,6 +308,14 @@
     background: var(--paper); color: var(--ink);
   }
   .gridlab input[type="number"]:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
+  .ytin {
+    flex: 1; min-width: 160px;
+    font: inherit; font-size: 12.5px;
+    padding: 6px 10px;
+    border: 1px solid var(--edge); border-radius: 6px;
+    background: var(--paper); color: var(--ink);
+  }
+  .ytin:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
   .tl-syls { position: absolute; top: 98px; left: 0; right: 0; bottom: 0; }
   .tl-syl {
     position: absolute; bottom: 0;
@@ -481,6 +489,14 @@
       <audio id="recordPreview" controls preload="metadata" hidden></audio>
       <a class="btn" id="recordDownload" href="#" download hidden style="text-decoration:none">녹음 저장</a>
       <button class="btn" id="recordDelete" hidden>녹음 삭제</button>
+    </div>
+    <div class="lyrics-row" id="ytRow" hidden>
+      <input type="text" id="ytUrl" class="ytin" placeholder="유튜브 주소 붙여넣기 (또는 [파일] 선택)">
+      <label class="gridlab">MR 키 <input type="number" id="ytKey" value="-4" min="-12" max="12" step="1"></label>
+      <label class="btn" for="ytFile">파일</label>
+      <input type="file" id="ytFile" accept="audio/*,video/*" style="display:none">
+      <button class="btn primary" id="ytGo">원곡·MR 만들기</button>
+      <span id="ytStatus" class="audioname"></span>
     </div>
     <div class="queue" id="queue" hidden></div>
   </header>
@@ -2818,7 +2834,7 @@
     mode = m;
     document.querySelectorAll('.tab').forEach(function (b) { b.classList.toggle('active', b.dataset.tab === m); });
     [$('lyricsRow'), $('actions'), tplRow, sheet, $('ioBox')].forEach(function (el) { el.hidden = m !== 'edit'; });
-    [$('timeControls'), recordControls, queueEl, timePane].forEach(function (el) { el.hidden = m !== 'time'; });
+    [$('timeControls'), recordControls, $('ytRow'), queueEl, timePane].forEach(function (el) { el.hidden = m !== 'time'; });
     if (m === 'time') layoutTimeline();
     else render();
   }
@@ -4380,6 +4396,98 @@
     messagingSenderId: '412073777990',
     appId: '1:412073777990:web:4d3257d2c0a52fd9232347'
   };
+  /* ---------- 유튜브/파일 → 원곡·MR·키변경 (Cloud Run 서버) ---------- */
+
+  var AUDIO_SERVER = '';  /* server/DEPLOY.md 대로 배포 후 Cloud Run URL 기입 */
+  var ytBusy = false;
+
+  function ytSetStatus(t) { $('ytStatus').textContent = t; }
+
+  $('ytFile').addEventListener('change', function () {
+    var f = this.files && this.files[0];
+    ytSetStatus(f ? '선택된 파일: ' + f.name : '');
+  });
+
+  $('ytGo').addEventListener('click', function () {
+    if (ytBusy) { flash('이미 작업이 진행 중입니다.'); return; }
+    if (!fb.user) { flash('로그인이 필요합니다.'); return; }
+    if (!AUDIO_SERVER) { ytSetStatus('오디오 서버가 아직 배포되지 않았습니다.'); return; }
+    var url = $('ytUrl').value.trim();
+    var f = $('ytFile').files && $('ytFile').files[0];
+    if (!url && !f) { ytSetStatus('유튜브 주소를 넣거나 파일을 선택하세요.'); return; }
+    var key = Math.max(-12, Math.min(12, Math.round(+$('ytKey').value || 0)));
+    ytBusy = true;
+    ytSetStatus(f ? '파일 올리는 중…' : '작업 요청 중…');
+    var prep = f
+      ? (function () {
+        var path = 'users/' + fb.user.uid + '/uploads/' + Date.now() + '-src';
+        return fb.mods.st.uploadBytes(fb.mods.st.ref(fb.stg, path), f,
+          { contentType: f.type || 'application/octet-stream' })
+          .then(function () { return { storagePath: path }; });
+      })()
+      : Promise.resolve({ url: url });
+    prep.then(function (body) {
+      body.keys = key ? [key] : [];
+      return fb.user.getIdToken().then(function (tok) {
+        return fetch(AUDIO_SERVER + '/jobs', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + tok },
+          body: JSON.stringify(body)
+        });
+      });
+    }).then(function (r) { return r.json(); }).then(function (res) {
+      if (!res.jobId) throw new Error(res.error || '작업 생성 실패');
+      ytWatchJob(res.jobId, key);
+    }).catch(function (e) {
+      ytBusy = false;
+      ytSetStatus('실패: ' + ((e && e.message) || e));
+    });
+  });
+
+  function ytWatchJob(jid, key) {
+    var refDoc = fb.mods.fs.doc(fb.db, 'users', fb.user.uid, 'jobs', jid);
+    var stop = fb.mods.fs.onSnapshot(refDoc, function (snap) {
+      var d = snap.data() || {};
+      ytSetStatus(d.step || d.status || '진행 중…');
+      if (d.status === 'done') {
+        stop();
+        ytBusy = false;
+        ytLoadResults(d, key);
+      } else if (d.status === 'error') {
+        stop();
+        ytBusy = false;
+      }
+    }, function () {
+      ytBusy = false;
+      ytSetStatus('상태 확인에 실패했습니다.');
+    });
+  }
+
+  function ytLoadResults(d, key) {
+    var files = d.files || {};
+    var mrName = key ? ('MR' + (key > 0 ? '+' + key : String(key)) + '키') : 'MR원키';
+    if (!files[mrName]) mrName = 'MR원키';
+    var items = [
+      ['orig', files['원곡'], (d.title || '원곡') + '.mp3'],
+      ['mr', files[mrName], (d.title || 'MR') + ' ' + mrName + '.mp3']
+    ];
+    ytSetStatus('결과 트랙 불러오는 중…');
+    var left = items.filter(function (it) { return it[1]; }).length;
+    if (!left) { ytSetStatus('결과 파일을 찾지 못했습니다.'); return; }
+    items.forEach(function (it) {
+      if (!it[1]) return;
+      fb.mods.st.getDownloadURL(fb.mods.st.ref(fb.stg, it[1]))
+        .then(function (u) { return fetch(u); })
+        .then(function (r) { return r.blob(); })
+        .then(function (b) {
+          loadTrack(it[0], b, it[2], true);
+          left--;
+          if (!left) ytSetStatus('완료 — 원곡/MR이 트랙에 적용됐습니다.');
+        })
+        .catch(function () { ytSetStatus('결과 다운로드 실패'); });
+    });
+  }
+
   fbInit(FB_DEFAULT_CFG);
 
   /* ---------- 시작 ---------- */
