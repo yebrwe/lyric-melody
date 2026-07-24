@@ -1905,6 +1905,11 @@
       playT0 = actx.currentTime;
       playing = true;
       startSources();
+      /* 다른 곳을 보고 있었다면 재생핀 위치로 화면 복귀 */
+      var vw = tlScroll.clientWidth, px = playOff * pps;
+      if (px < tlScroll.scrollLeft || px > tlScroll.scrollLeft + vw * 0.9) {
+        tlScroll.scrollLeft = Math.max(0, px - vw * 0.25);
+      }
       playBtn.textContent = '⏸ 일시정지';
       if (!rafId) rafId = requestAnimationFrame(rafLoop);
     }).catch(function (e) {
