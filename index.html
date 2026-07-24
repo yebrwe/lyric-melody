@@ -4405,6 +4405,17 @@
 
   $('ytFile').addEventListener('change', function () {
     var f = this.files && this.files[0];
+    /* .txt = 유튜브 쿠키 등록 (봇 차단 우회용), 그 외 = 처리할 음원 파일 */
+    if (f && /\.txt$/i.test(f.name)) {
+      this.value = '';
+      if (!fb.user) { ytSetStatus('로그인 후 다시 선택하세요.'); return; }
+      ytSetStatus('유튜브 쿠키 등록 중…');
+      fb.mods.st.uploadBytes(fb.mods.st.ref(fb.stg, 'users/' + fb.user.uid + '/cookies.txt'), f,
+        { contentType: 'text/plain' })
+        .then(function () { ytSetStatus('유튜브 쿠키 등록 완료 — 이제 URL로 다시 시도하세요.'); })
+        .catch(function () { ytSetStatus('쿠키 등록 실패'); });
+      return;
+    }
     ytSetStatus(f ? '선택된 파일: ' + f.name : '');
   });
 

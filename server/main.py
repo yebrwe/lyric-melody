@@ -34,15 +34,28 @@ def process(uid, jid, url, src_path, keys):
         bucket = fb_storage.bucket()
         with tempfile.TemporaryDirectory() as td:
             title = '음원'
+
+            # 사용자가 등록한 유튜브 쿠키가 있으면 사용 (봇 차단 확실 우회)
+            cookies = None
+            cblob = bucket.blob(f'users/{uid}/cookies.txt')
+            if cblob.exists():
+                cookies = os.path.join(td, 'cookies.txt')
+                cblob.download_to_filename(cookies)
+
+            def yt(args):
+                base = ['yt-dlp', '--no-playlist', '--js-runtimes', 'node']
+                if cookies:
+                    base += ['--cookies', cookies]
+                return base + args
+
             if url:
                 set_status(uid, jid, status='downloading', step='유튜브에서 내려받는 중…')
                 subprocess.run(
-                    ['yt-dlp', '--no-playlist', '-f', 'bestaudio',
-                     '-o', os.path.join(td, 'src.%(ext)s'), url],
+                    yt(['-f', 'bestaudio', '-o', os.path.join(td, 'src.%(ext)s'), url]),
                     check=True, timeout=600)
                 srcf = next(os.path.join(td, f) for f in os.listdir(td) if f.startswith('src.'))
                 got = subprocess.run(
-                    ['yt-dlp', '--no-playlist', '--print', '%(title)s', url],
+                    yt(['--print', '%(title)s', url]),
                     capture_output=True, text=True, timeout=120)
                 title = (got.stdout.strip().splitlines() or ['음원'])[0][:60] or '음원'
             else:

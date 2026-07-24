@@ -3,6 +3,7 @@ flask
 gunicorn
 firebase-admin
 yt-dlp
+bgutil-ytdlp-pot-provider
 torch
 torchaudio
 demucs
