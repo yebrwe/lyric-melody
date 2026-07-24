@@ -466,6 +466,8 @@
       <button class="btn primary" id="tapBtn" disabled>다음 글자 찍기 (Enter)</button>
       <button class="btn" id="shiftL" title="배치된 글자 전체를 왼쪽으로 16비트 1칸 (Shift+클릭 = 1박)">전체 ◀</button>
       <button class="btn" id="shiftR" title="배치된 글자 전체를 오른쪽으로 16비트 1칸 (Shift+클릭 = 1박)">전체 ▶</button>
+      <button class="btn" id="tlVibDown" title="선택한 음의 바이브레이션 -1">바이브 −</button>
+      <button class="btn" id="tlVibUp" title="선택한 음의 바이브레이션 +1">바이브 ＋</button>
       <button class="btn" id="clearTimes">배치 전체 지우기</button>
       <span id="audioName" class="audioname">원곡과 MR을 각각 불러오면 동시에 재생되고, 트랙 버튼으로 끄고 켤 수 있습니다</span>
     </div>
@@ -515,7 +517,8 @@
       <p class="help">
         오디오를 불러오고 <b>재생하면서 글자가 불리는 순간 Enter</b>(또는 [다음 글자 찍기])를 누르면 큐의 다음 글자가 그 시각에 배치됩니다 ·
         배치된 글자는 <b>좌우 드래그</b>로 미세 조정 · 글자를 클릭하면 음이 선택되어 <b>↑ ↓</b> 계단 수정(마지막 음에서 연음 추가),
-        <b>1~9</b> 바이브레이션, <b>Delete</b> 음 삭제 · <b>Shift+Delete</b> 또는 ✕ = 배치 해제 · 파형 클릭 = 해당 위치로 이동 ·
+        숫자키(빠르게 이어 누르면 12처럼 두 자리) 또는 <b>[바이브 ±]</b> 버튼으로 바이브레이션, <b>Delete</b> 음 삭제 ·
+        <b>Shift+Delete</b> 또는 ✕ = 배치 해제 · 파형 클릭 = 해당 위치로 이동 ·
         <b>Space</b> 재생/일시정지 · ← → 2초 이동 · 레인 왼쪽 버튼으로 트랙별 소리 켜고 끄기 ·
         <b>[● MR 녹음]</b> = 현재 위치부터 원곡은 자동으로 끄고 MR만 들으며 녹음(기본은 MR+목소리 한 파일, 체크를 끄면 목소리만) ·
         녹음이 끝나면 바로 듣거나 파일로 저장할 수 있으며, 스피커 소리 유입을 막으려면 유선 이어폰을 권장합니다(Bluetooth는 싱크가 늦을 수 있음) ·
@@ -528,7 +531,7 @@
     <p class="help" id="helpEdit">
       글자를 <b>클릭</b>하고 <b>↑ ↓</b>만 누르면 계단이 바로 쌓입니다 (마지막 음에서는 연음 자동 추가, 잘못 쌓았으면 Delete) ·
       중간 음은 선택 후 ↑ ↓ 또는 드래그로 방향 수정 · ← → 음 이동 · Enter 연음 추가 ·
-      <b>1~9</b> 바이브레이션 숫자 지정, <b>0</b> 지우기 · 음이 1개인 글자는 아무 표시가 없습니다 ·
+      <b>숫자키</b>로 바이브레이션 지정(빠르게 이어 누르면 12처럼 두 자리, 최대 99), <b>0</b> 지우기 · 음이 1개인 글자는 아무 표시가 없습니다 ·
       같은 방향 연속 계단은 <b>3음까지</b>만 가능합니다 (방향이 바뀌면 다시 이어짐) ·
       가사에 <b>-</b>를 입력하면 앞 글자의 음을 길게 끄는 표시가 됩니다 (16비트 한 칸 = - 하나) ·
       위의 <b>패턴 버튼</b>은 선택한 글자에 바로 적용되고, [＋ 현재 패턴 저장]으로 나만의 패턴을 추가할 수 있습니다
@@ -1113,10 +1116,18 @@
     }
     update();
   }
+  /* 숫자키 연속 입력: 0.7초 안에 이어 누르면 두 자리(최대 99)로 결합 — 예: 1,2 → 12 */
+  var lastDigitAt = 0;
+  function bufferedDigit(d, getV, setV) {
+    var now = Date.now();
+    var base = (now - lastDigitAt < 700) ? (getV() || 0) : 0;
+    lastDigitAt = now;
+    setV(Math.min(99, base * 10 + d));
+  }
   function vibNum(d) {
     if (!sel) return;
     var nt = cellAt(sel).notes[sel.ni];
-    nt.vn = Math.max(0, (nt.vn || 0) + d);
+    nt.vn = Math.max(0, Math.min(99, (nt.vn || 0) + d));
     update();
   }
   function vibSet(num) {
@@ -1342,7 +1353,12 @@
         else tlDelNote();
         e.preventDefault();
       }
-      else if (/^[0-9]$/.test(k)) { tlVib(+k); }
+      else if (/^[0-9]$/.test(k)) {
+        bufferedDigit(+k, function () {
+          var c = tlCell();
+          return c ? (c.notes[tlSel.ni].vn || 0) : 0;
+        }, tlVib);
+      }
       else if (k === 'ArrowLeft') { seekTo(curTime() - 2); e.preventDefault(); }
       else if (k === 'ArrowRight') { seekTo(curTime() + 2); e.preventDefault(); }
       else if (k === 'Home') { seekTo(0); tlScroll.scrollLeft = 0; e.preventDefault(); }
@@ -1354,7 +1370,12 @@
     else if (k === 'ArrowDown') { setDir(-1); e.preventDefault(); }
     else if (k === 'Enter') { addNote(); e.preventDefault(); }
     else if (k === 'Backspace' || k === 'Delete') { delNote(); e.preventDefault(); }
-    else if (/^[0-9]$/.test(k)) { vibSet(+k); }
+    else if (/^[0-9]$/.test(k)) {
+      bufferedDigit(+k, function () {
+        var c = cellAt(sel);
+        return c && sel ? (c.notes[sel.ni].vn || 0) : 0;
+      }, vibSet);
+    }
   });
 
   /* ---------- 상단 버튼 ---------- */
@@ -2781,6 +2802,15 @@
     c.notes[tlSel.ni].vn = n2;
     save(); renderTlSyls();
   }
+  function tlVibDelta(d) {
+    var c = tlCell();
+    if (!c) { flash('타임라인의 글자를 먼저 클릭하세요.'); return; }
+    var nt = c.notes[tlSel.ni];
+    nt.vn = Math.max(0, Math.min(99, (nt.vn || 0) + d));
+    save(); renderTlSyls();
+  }
+  $('tlVibUp').addEventListener('click', function () { tlVibDelta(1); });
+  $('tlVibDown').addEventListener('click', function () { tlVibDelta(-1); });
   function tlUnplace() {
     if (!tlSel) return;
     delete doc.lines[tlSel.li][tlSel.ci].t;
