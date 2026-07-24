@@ -2,16 +2,51 @@ rules_version = '2';
 
 service firebase.storage {
   match /b/{bucket}/o {
-    match /users/{userId}/{fileName} {
-      allow read: if request.auth != null
-        && request.auth.uid == userId
-        && fileName.matches('audio-(orig|mr)');
+    function isOwner(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
 
-      allow create, update: if request.auth != null
-        && request.auth.uid == userId
-        && fileName.matches('audio-(orig|mr)')
+    function isSafeSongId(songId) {
+      return songId.size() >= 1
+        && songId.size() <= 64
+        && songId.matches('^[A-Za-z0-9_-]+$');
+    }
+
+    function isAudioFile(fileName) {
+      return fileName.matches('^audio-(orig|mr)(-[A-Za-z0-9_-]{1,64})?$');
+    }
+
+    function isValidAudioWrite(fileName) {
+      return isAudioFile(fileName)
         && request.resource.size < 200 * 1024 * 1024
+        && request.resource.contentType is string
         && request.resource.contentType.matches('audio/.*');
+    }
+
+    match /users/{userId}/{fileName} {
+      allow read: if isOwner(userId) && isAudioFile(fileName);
+
+      allow create: if isOwner(userId)
+        && isValidAudioWrite(fileName);
+
+      allow update: if isOwner(userId)
+        && (fileName == 'audio-orig' || fileName == 'audio-mr')
+        && isValidAudioWrite(fileName);
+    }
+
+    match /users/{userId}/songs/{songId}/{fileName} {
+      allow read: if isOwner(userId)
+        && isSafeSongId(songId)
+        && isAudioFile(fileName);
+
+      allow create: if isOwner(userId)
+        && isSafeSongId(songId)
+        && isValidAudioWrite(fileName);
+
+      allow update: if isOwner(userId)
+        && isSafeSongId(songId)
+        && (fileName == 'audio-orig' || fileName == 'audio-mr')
+        && isValidAudioWrite(fileName);
     }
   }
 }

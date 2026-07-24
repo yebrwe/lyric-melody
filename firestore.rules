@@ -6,6 +6,13 @@ service cloud.firestore {
       return request.auth != null && request.auth.uid == userId;
     }
 
+    function isSafeSongId(songId) {
+      return songId is string
+        && songId.size() >= 1
+        && songId.size() <= 64
+        && songId.matches('^[A-Za-z0-9_-]+$');
+    }
+
     function isValidMainDoc() {
       return request.resource.data.keys().hasOnly([
           'data', 'mtime', 'revision', 'schemaVersion', 'updatedAt'
@@ -15,6 +22,93 @@ service cloud.firestore {
         && request.resource.data.revision is int
         && request.resource.data.revision > 0
         && request.resource.data.schemaVersion == 2
+        && request.resource.data.updatedAt is timestamp;
+    }
+
+    function hasValidLegacySource() {
+      return (!('legacySourceRevision' in request.resource.data)
+          || (
+            request.resource.data.legacySourceRevision is int
+            && request.resource.data.legacySourceRevision >= 0
+          ))
+        && (!('legacySourceHash' in request.resource.data)
+          || (
+            request.resource.data.legacySourceHash is string
+            && request.resource.data.legacySourceHash.size() >= 1
+            && request.resource.data.legacySourceHash.size() <= 256
+          ));
+    }
+
+    function hasValidRecoverySource() {
+      return (
+          !('recoverySourceId' in request.resource.data)
+          && !('recoverySourceHash' in request.resource.data)
+        )
+        || (
+          request.resource.data.recoverySourceId is string
+          && isSafeSongId(request.resource.data.recoverySourceId)
+          && request.resource.data.recoverySourceHash is string
+          && request.resource.data.recoverySourceHash.size() >= 1
+          && request.resource.data.recoverySourceHash.size() <= 256
+        );
+    }
+
+    function isValidSongDoc(songId) {
+      return isSafeSongId(songId)
+        && request.resource.data.keys().hasOnly([
+          'title', 'data', 'mtime', 'revision', 'schemaVersion',
+          'archived', 'createdAt', 'updatedAt',
+          'legacySourceRevision', 'legacySourceHash',
+          'recoverySourceId', 'recoverySourceHash'
+        ])
+        && request.resource.data.keys().hasAll([
+          'title', 'data', 'mtime', 'revision', 'schemaVersion',
+          'archived', 'createdAt', 'updatedAt'
+        ])
+        && request.resource.data.title is string
+        && request.resource.data.title.size() >= 1
+        && request.resource.data.title.size() <= 200
+        && request.resource.data.data is string
+        && request.resource.data.mtime is int
+        && request.resource.data.mtime >= 0
+        && request.resource.data.revision is int
+        && request.resource.data.revision > 0
+        && request.resource.data.schemaVersion == 3
+        && request.resource.data.archived is bool
+        && request.resource.data.createdAt is timestamp
+        && request.resource.data.updatedAt is timestamp
+        && hasValidLegacySource()
+        && hasValidRecoverySource();
+    }
+
+    function isValidAudioAsset(songId, trackId) {
+      return isSafeSongId(songId)
+        && (trackId == 'orig' || trackId == 'mr')
+        && request.resource.data.keys().hasOnly([
+          'objectName', 'name', 'contentType', 'size',
+          'revision', 'schemaVersion', 'updatedAt'
+        ])
+        && request.resource.data.keys().hasAll([
+          'objectName', 'name', 'contentType', 'size',
+          'revision', 'schemaVersion', 'updatedAt'
+        ])
+        && request.resource.data.objectName is string
+        && (
+          (trackId == 'orig'
+            && request.resource.data.objectName.matches('^audio-orig-[A-Za-z0-9_-]{1,64}$'))
+          || (trackId == 'mr'
+            && request.resource.data.objectName.matches('^audio-mr-[A-Za-z0-9_-]{1,64}$'))
+        )
+        && request.resource.data.name is string
+        && request.resource.data.name.size() <= 500
+        && request.resource.data.contentType is string
+        && request.resource.data.contentType.matches('^audio/.*')
+        && request.resource.data.size is int
+        && request.resource.data.size >= 0
+        && request.resource.data.size < 200 * 1024 * 1024
+        && request.resource.data.revision is int
+        && request.resource.data.revision > 0
+        && request.resource.data.schemaVersion == 1
         && request.resource.data.updatedAt is timestamp;
     }
 
@@ -36,6 +130,36 @@ service cloud.firestore {
             && request.resource.data.revision == resource.data.revision + 1
           )
         );
+    }
+
+    match /users/{userId}/songs/{songId} {
+      allow list: if isOwner(userId);
+      allow get: if isOwner(userId) && isSafeSongId(songId);
+
+      allow create: if isOwner(userId)
+        && isValidSongDoc(songId)
+        && request.resource.data.revision == 1;
+
+      allow update: if isOwner(userId)
+        && isValidSongDoc(songId)
+        && resource.data.revision is int
+        && request.resource.data.revision == resource.data.revision + 1
+        && request.resource.data.createdAt == resource.data.createdAt;
+    }
+
+    match /users/{userId}/songs/{songId}/assets/{trackId} {
+      allow read: if isOwner(userId)
+        && isSafeSongId(songId)
+        && (trackId == 'orig' || trackId == 'mr');
+
+      allow create: if isOwner(userId)
+        && isValidAudioAsset(songId, trackId)
+        && request.resource.data.revision == 1;
+
+      allow update: if isOwner(userId)
+        && isValidAudioAsset(songId, trackId)
+        && resource.data.revision is int
+        && request.resource.data.revision == resource.data.revision + 1;
     }
   }
 }
