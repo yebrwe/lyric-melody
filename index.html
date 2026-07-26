@@ -376,6 +376,8 @@
     textarea, .gridlab input[type="number"] { font-size: 16px; }
     .gridlab input[type="number"] { min-height: 36px; }
     .status { flex-basis: 100%; margin-left: 0; white-space: normal; }
+    /* 곡 분석(BPM·첫 박·격자)은 PC에서 맞춰두는 값이라 모바일에서는 숨긴다 */
+    #timeControls .analysis { display: none; }
   }
 
   @media print {
@@ -467,9 +469,9 @@
       <input type="file" id="fileOrig" accept="audio/*" style="display:none">
       <label class="btn" for="fileMr">MR 불러오기</label>
       <input type="file" id="fileMr" accept="audio/*" style="display:none">
-      <label class="gridlab">BPM <input type="number" id="bpmIn" min="30" max="300" step="0.01" placeholder="120"></label>
-      <label class="gridlab">첫 박 <input type="number" id="offIn" min="0" step="0.01" placeholder="0.00">s</label>
-      <label class="gridlab" title="글자를 찍거나 드래그하면 가장 가까운 16비트 칸 경계에 자동으로 딱 붙여줍니다"><input type="checkbox" id="snapChk" checked> 격자 스냅</label>
+      <label class="gridlab analysis">BPM <input type="number" id="bpmIn" min="30" max="300" step="0.01" placeholder="120"></label>
+      <label class="gridlab analysis">첫 박 <input type="number" id="offIn" min="0" step="0.01" placeholder="0.00">s</label>
+      <label class="gridlab analysis" title="글자를 찍거나 드래그하면 가장 가까운 16비트 칸 경계에 자동으로 딱 붙여줍니다"><input type="checkbox" id="snapChk" checked> 격자 스냅</label>
       <button class="btn" id="homeBtn" title="재생 위치를 맨 처음으로 (Home)">⏮ 처음</button>
       <button class="btn" id="playBtn" disabled>▶ 재생</button>
       <span id="timeDisp" class="status" style="margin-left:0">0:00.0 / 0:00.0</span>
@@ -487,11 +489,11 @@
       <span id="audioName" class="audioname">오디오 없음</span>
     </div>
     <div class="recordbar" id="recordControls" hidden>
-      <button class="btn" id="recordBtn" disabled aria-pressed="false">● MR 녹음</button>
-      <label class="gridlab" title="켜면 MR과 목소리가 한 파일로 저장되고, 끄면 목소리만 저장됩니다">
-        <input type="checkbox" id="recordMix" checked> 녹음 파일에 MR 포함
+      <button class="btn" id="recordBtn" disabled aria-pressed="false" title="현재 재생 위치부터 한 구간을 녹음합니다. 정지하면 트랙의 녹음 레인에 쌓이고, 겹치는 부분은 새 녹음이 대체합니다">● 구간 녹음</button>
+      <label class="gridlab" title="켜면 [녹음 저장]으로 합칠 때 MR을 함께 섞습니다. 끄면 목소리만 저장됩니다">
+        <input type="checkbox" id="recordMix" checked> 저장 파일에 MR 포함
       </label>
-      <label class="gridlab" title="녹음 파일에서 내 목소리가 MR보다 늦게 들리면 값을 키우고, 빠르면 줄이세요. 기기 지연은 자동 보정되고 이 값은 추가 미세 조정입니다">
+      <label class="gridlab" title="녹음에서 내 목소리가 MR보다 늦게 들리면 값을 키우고, 빠르면 줄이세요. 기기 지연은 자동 보정되고 이 값은 추가 미세 조정입니다">
         싱크 보정 <input type="number" id="recordSyncMs" value="0" min="-500" max="500" step="10">ms
       </label>
       <label class="gridlab" title="이어폰이 없어 스피커로 MR을 들을 때 켜세요. 에코 제거로 스피커 소리가 마이크에 섞이는 걸 줄여줍니다 (음질은 이어폰+끔이 가장 좋습니다)">
@@ -499,9 +501,9 @@
       </label>
       <span class="record-note" id="recordStatus">🎧 이어폰 권장 — 스피커 사용 시 [스피커 녹음 모드]를 켜세요 · 현재 재생 위치부터 녹음</span>
       <span class="sr-only" id="recordAnnounce" role="status" aria-live="polite"></span>
-      <audio id="recordPreview" controls preload="metadata" hidden></audio>
-      <a class="btn" id="recordDownload" href="#" download hidden style="text-decoration:none">녹음 저장</a>
-      <button class="btn" id="recordDelete" hidden>녹음 삭제</button>
+      <button class="btn" id="recordUndo" hidden title="가장 최근에 녹음한 구간을 지웁니다">마지막 구간 삭제</button>
+      <button class="btn" id="recordExport" hidden title="모든 구간을 한 파일(WAV)로 합쳐 기기에 내려받습니다">녹음 저장</button>
+      <button class="btn" id="recordDelete" hidden>전체 삭제</button>
     </div>
     <div class="queue" id="queue" hidden></div>
   </header>
@@ -1559,7 +1561,6 @@
       if (!canSwitch) return false;
       storeLocalDoc(false);
       if (fb.user && fb.syncReady && isUserDocDirty(fb.user.uid, previousId)) scheduleSongSave(previousId);
-      try { recordPreview.pause(); } catch (e) {}
       clearAudioTracks();
       songSwitchGeneration++;
       activeSongId = songId;
@@ -1645,7 +1646,8 @@
     var recordingNow = recordSession && recordSession.ownerKey === recordKey;
     var warning = recordingNow
       ? '\n현재 진행 중인 녹음과 그 결과도 함께 삭제됩니다.'
-      : (result && !result.saved ? '\n아직 저장하지 않은 이 곡의 녹음 결과도 함께 삭제됩니다.' : '');
+      : (result && result.clips.length && !result.saved
+        ? '\n아직 저장하지 않은 이 곡의 녹음 구간도 함께 삭제됩니다.' : '');
     if (!window.confirm('“' + meta.title + '”을 삭제할까요?\n악보는 모든 기기에서 목록에서 숨겨지고, 오디오는 안전을 위해 보관됩니다.' + warning)) return;
     var visible = songLibrary.songs.filter(function (item) { return !item.archived && item.id !== songId; });
     var nextPromise = Promise.resolve(true);
@@ -1666,8 +1668,6 @@
         if (fb.user) markSongDirty(fb.user.uid, songId, archivedDoc);
       }
       saveSongLibrary(owner);
-      var archivedResult = recordResults[recordKey];
-      if (archivedResult && archivedResult.url) URL.revokeObjectURL(archivedResult.url);
       delete recordResults[recordKey];
       delete recordErrors[recordKey];
       renderSongLibrary();
@@ -1706,7 +1706,7 @@
     timeDisp = $('timeDisp'), queueEl = $('queue'), recordControls = $('recordControls'),
     recordBtn = $('recordBtn'), recordMix = $('recordMix'), recordSyncMsIn = $('recordSyncMs'),
     speakerModeChk = $('speakerMode'), recordStatus = $('recordStatus'),
-    recordPreview = $('recordPreview'), recordDownload = $('recordDownload'),
+    recordUndo = $('recordUndo'), recordExport = $('recordExport'),
     recordDelete = $('recordDelete'), recordAnnounce = $('recordAnnounce');
   /* 트랙 배율(px/초): 기본은 한 단계 확대(120), 조작한 배율은 기억 */
   var pps = (function () {
@@ -1829,10 +1829,10 @@
   var AC = window.AudioContext || window.webkitAudioContext;
   var actx = null;
   var tracks = {
-    orig: { label: '원곡', buffer: null, name: '', on: true, src: null, gainNode: null, startAt: 0 },
-    mr: { label: 'MR', buffer: null, name: '', on: true, src: null, gainNode: null, startAt: 0 },
-    /* rec = 직전 녹음 결과. 클라우드에 저장하지 않고 이 화면에서만 들어보는 용도 */
-    rec: { label: '녹음', buffer: null, name: '', on: true, src: null, gainNode: null, startAt: 0 }
+    orig: { label: '원곡', buffer: null, name: '', on: true, src: null, gainNode: null },
+    mr: { label: 'MR', buffer: null, name: '', on: true, src: null, gainNode: null },
+    /* rec = 녹음 구간(클립) 목록. 겹침 없이 유지되며 클라우드에 저장하지 않는다 */
+    rec: { label: '녹음', clips: [], name: '', on: true, srcs: [], gainNode: null, sig: '' }
   };
   var audioTokens = { orig: 0, mr: 0 };
   var audioLatest = { orig: null, mr: null };
@@ -1847,12 +1847,19 @@
   function setPlayLabel(t) { playBtn.textContent = t; editPlayBtn.textContent = t; }
   function setPlayDisabled(b) { playBtn.disabled = b; editPlayBtn.disabled = b; editHomeBtn.disabled = b; }
 
+  function recEnd() {
+    var e = 0;
+    tracks.rec.clips.forEach(function (c) {
+      e = Math.max(e, Math.max(0, c.startAt) + c.buffer.duration);
+    });
+    return e;
+  }
   function dur() {
     return Math.max(tracks.orig.buffer ? tracks.orig.buffer.duration : 0,
       tracks.mr.buffer ? tracks.mr.buffer.duration : 0,
-      tracks.rec.buffer ? Math.max(0, tracks.rec.startAt) + tracks.rec.buffer.duration : 0);
+      recEnd());
   }
-  function anyLoaded() { return !!(tracks.orig.buffer || tracks.mr.buffer || tracks.rec.buffer); }
+  function anyLoaded() { return !!(tracks.orig.buffer || tracks.mr.buffer || tracks.rec.clips.length); }
   function curTime() {
     return playing ? Math.min(dur(), playOff + actx.currentTime - playT0) : playOff;
   }
@@ -1872,44 +1879,48 @@
     return { mins: mins, maxs: maxs, perSec: ab.sampleRate / per };
   }
   function stopSources() {
-    ['orig', 'mr', 'rec'].forEach(function (k) {
+    ['orig', 'mr'].forEach(function (k) {
       var tr = tracks[k];
       try { if (tr.src) tr.src.stop(); } catch (e) {}
       tr.src = null;
       tr.gainNode = null;
     });
+    tracks.rec.srcs.forEach(function (s) { try { s.stop(); } catch (e) {} });
+    tracks.rec.srcs = [];
+    tracks.rec.gainNode = null;
   }
   function startSources() {
-    ['orig', 'mr', 'rec'].forEach(function (k) {
+    ['orig', 'mr'].forEach(function (k) {
       var tr = tracks[k];
-      /* rel = 트랙 내부 재생 위치. 녹음 트랙은 녹음을 시작한 지점(startAt)부터 놓인다 */
-      var rel = playOff - (tr.startAt || 0);
-      if (!tr.buffer || rel >= tr.buffer.duration) return;
+      if (!tr.buffer || playOff >= tr.buffer.duration) return;
       var s = actx.createBufferSource(), g = actx.createGain();
       s.buffer = tr.buffer;
       g.gain.value = tr.on ? 1 : 0;
       s.connect(g);
       g.connect(actx.destination);
-      if (k === 'mr' && recordSession && recordSession.phase === 'recording' &&
-          recordSession.includeMr && recordSession.mixDest) {
-        var recordMrGain = actx.createGain();
-        recordMrGain.gain.value = 0.72;
-        g.connect(recordMrGain);
-        var mixTail = recordMrGain;
-        if (recordSession.syncDelay > 0) {
-          var syncNode = actx.createDelay(1.0);
-          syncNode.delayTime.value = recordSession.syncDelay;
-          recordMrGain.connect(syncNode);
-          mixTail = syncNode;
-        }
-        mixTail.connect(recordSession.mixBus || recordSession.mixDest);
-        recordSession.mrRecordGain = recordMrGain;
-      }
-      if (rel >= 0) s.start(0, rel);
-      else s.start(actx.currentTime - rel, 0);
+      s.start(0, playOff);
       tr.src = s;
       tr.gainNode = g;
     });
+    /* 녹음 구간들 — 각자 자기 위치(startAt)에서 재생. 새 구간 녹음 중에는 틀지 않는다 */
+    var rec = tracks.rec;
+    rec.srcs = [];
+    if (rec.clips.length && !recordSession) {
+      var rg = actx.createGain();
+      rg.gain.value = rec.on ? 1 : 0;
+      rg.connect(actx.destination);
+      rec.gainNode = rg;
+      rec.clips.forEach(function (c) {
+        var rel = playOff - c.startAt;
+        if (rel >= c.buffer.duration) return;
+        var cs = actx.createBufferSource();
+        cs.buffer = c.buffer;
+        cs.connect(rg);
+        if (rel >= 0) cs.start(0, rel);
+        else cs.start(actx.currentTime - rel, 0);
+        rec.srcs.push(cs);
+      });
+    }
   }
   function playPause() {
     if (recordSession) {
@@ -1918,7 +1929,6 @@
       return;
     }
     if (!anyLoaded()) { flash('먼저 오디오를 불러오세요.'); return; }
-    if (!recordPreview.paused) recordPreview.pause();
     if (playing || playStarting) { pauseTimelinePlayback(); return; }
     var request = ++playRequest;
     playStarting = true;
@@ -1963,18 +1973,22 @@
     }
     updatePlayhead(true);
   }
+  function trackHasAudio(k) {
+    return k === 'rec' ? !!tracks.rec.clips.length : !!tracks[k].buffer;
+  }
   function updateTrackUI() {
     [['orig', $('muteOrig')], ['mr', $('muteMr')], ['rec', $('muteRec')]].forEach(function (pair) {
       var tr = tracks[pair[0]], btn = pair[1];
-      btn.disabled = !tr.buffer;
-      btn.classList.toggle('on', !!tr.buffer && tr.on);
+      var has = trackHasAudio(pair[0]);
+      btn.disabled = !has;
+      btn.classList.toggle('on', has && tr.on);
       btn.textContent = tr.label + ' ' + (tr.on ? '🔊' : '🔇');
       btn.title = tr.name || '';
     });
     var names = [];
     if (tracks.orig.name) names.push('원곡: ' + tracks.orig.name);
     if (tracks.mr.name) names.push('MR: ' + tracks.mr.name);
-    if (tracks.rec.buffer) names.push('녹음: ' + fmt(tracks.rec.buffer.duration));
+    if (tracks.rec.clips.length) names.push('녹음 ' + tracks.rec.clips.length + '구간');
     audioNameEl.textContent = names.length ? names.join('  ·  ')
       : '오디오 없음';
     setPlayDisabled(!anyLoaded());
@@ -1984,7 +1998,7 @@
   function toggleTrack(k) {
     if (recordSession) { flash('녹음 중에는 트랙을 바꿀 수 없습니다.'); return; }
     var tr = tracks[k];
-    if (!tr.buffer) return;
+    if (!trackHasAudio(k)) return;
     tr.on = !tr.on;
     if (tr.gainNode) tr.gainNode.gain.value = tr.on ? 1 : 0;
     updateTrackUI();
@@ -1994,20 +2008,19 @@
   $('muteMr').addEventListener('click', function () { toggleTrack('mr'); });
   $('muteRec').addEventListener('click', function () { toggleTrack('rec'); });
 
-  /* 현재 곡의 녹음 결과를 타임라인 '녹음' 레인에 반영한다.
-     녹음 중에는 직전 녹음이 새 녹음에 섞이지 않도록 레인에서 내린다. */
+  /* 현재 곡의 녹음 구간들을 타임라인 '녹음' 레인에 반영한다.
+     녹음 중에는 이전 구간이 새 녹음에 섞이지 않도록 레인에서 내린다. */
   function syncRecTrack() {
     var result = currentRecordResult();
-    var ab = (result && !recordSession && result.audioBuffer) ? result.audioBuffer : null;
-    var startAt = ab ? (result.startAt || 0) : 0;
-    if (tracks.rec.buffer === ab && tracks.rec.startAt === startAt) return;
-    var wasOn = tracks.rec.buffer === null;
-    tracks.rec.buffer = ab;
-    tracks.rec.peaks = ab ? (result.peaks || null) : null;
-    tracks.rec.name = ab ? (result.filename || '녹음') : '';
-    tracks.rec.startAt = startAt;
-    if (wasOn && ab) tracks.rec.on = true;
-    if (tracks.rec.gainNode) tracks.rec.gainNode.gain.value = tracks.rec.on && ab ? 1 : 0;
+    var clips = (result && !recordSession) ? result.clips : [];
+    var sig = (result ? result.ownerKey + ':' + (result.rev || 0) : 'none') +
+      (recordSession ? ':busy' : '') + ':' + clips.length;
+    if (tracks.rec.sig === sig) return;
+    if (!tracks.rec.clips.length && clips.length) tracks.rec.on = true;
+    tracks.rec.sig = sig;
+    tracks.rec.clips = clips;
+    tracks.rec.name = clips.length ? '녹음 ' + clips.length + '구간' : '';
+    if (tracks.rec.gainNode) tracks.rec.gainNode.gain.value = tracks.rec.on && clips.length ? 1 : 0;
     updateTrackUI();
     layoutTimeline();
   }
@@ -2064,6 +2077,7 @@
   }
   function recordingExt(mime) {
     mime = String(mime || '').toLowerCase();
+    if (mime.indexOf('wav') >= 0) return 'wav';
     if (mime.indexOf('mp4') >= 0 || mime.indexOf('aac') >= 0) return 'm4a';
     if (mime.indexOf('ogg') >= 0) return 'ogg';
     return 'webm';
@@ -2099,31 +2113,10 @@
   function announceRecording(ownerKey, message) {
     if (ownerKey === currentRecordingOwnerKey()) recordAnnounce.textContent = message;
   }
-  function syncRecordingPreview(result) {
-    var ownerKey = result ? result.ownerKey : '';
-    var objectUrl = result ? result.url : '';
-    if (recordPreview.dataset.ownerKey === ownerKey && recordPreview.dataset.objectUrl === objectUrl) return;
-    try { recordPreview.pause(); } catch (e) {}
-    recordPreview.removeAttribute('src');
-    recordDownload.removeAttribute('href');
-    recordDownload.removeAttribute('download');
-    if (result) {
-      recordPreview.src = result.url;
-      recordDownload.href = result.url;
-      recordDownload.download = result.filename;
-    } else {
-      try { recordPreview.load(); } catch (e) {}
-    }
-    recordPreview.dataset.ownerKey = ownerKey;
-    recordPreview.dataset.objectUrl = objectUrl;
-  }
   function clearRecordingOutput() {
     var ownerKey = currentRecordingOwnerKey();
-    var result = recordResults[ownerKey];
-    if (result && result.url) URL.revokeObjectURL(result.url);
     delete recordResults[ownerKey];
     delete recordErrors[ownerKey];
-    syncRecordingPreview(null);
     updateRecordUI();
   }
   function updateRecordUI() {
@@ -2132,36 +2125,37 @@
     var supported = recordingSupported();
     var result = currentRecordResult();
     var lastError = recordErrors[currentRecordingOwnerKey()] || '';
-    syncRecordingPreview(result);
+    var clips = result ? result.clips : [];
     syncRecTrack();
     recordBtn.classList.toggle('recording', active);
     recordBtn.setAttribute('aria-pressed', active ? 'true' : 'false');
     recordBtn.textContent = active ? '■ 녹음 종료' :
       (busy && recordSession.phase === 'requesting' ? '마이크 준비 중…' :
-        (busy ? '녹음 정리 중…' : '● MR 녹음'));
+        (busy ? '녹음 정리 중…' : '● 구간 녹음'));
     recordBtn.disabled = busy ? !active : (!supported || !tracks.mr.buffer);
     recordMix.disabled = recordSyncMsIn.disabled = speakerModeChk.disabled = busy;
     $('fileOrig').disabled = $('fileMr').disabled = busy;
     $('homeBtn').disabled = busy || !anyLoaded();
     $('muteOrig').disabled = busy || !tracks.orig.buffer;
     $('muteMr').disabled = busy || !tracks.mr.buffer;
-    $('muteRec').disabled = busy || !tracks.rec.buffer;
+    $('muteRec').disabled = busy || !tracks.rec.clips.length;
     setPlayDisabled(busy || !anyLoaded());
     tapBtn.disabled = !anyLoaded();
-    recordPreview.hidden = recordDownload.hidden = recordDelete.hidden = !result || busy;
+    recordUndo.hidden = recordExport.hidden = recordDelete.hidden = !clips.length || busy;
     if (busy) {
       if (recordSession.phase === 'requesting') recordStatus.textContent = '마이크 권한을 확인하는 중입니다…';
-      else if (recordSession.phase === 'stopping') recordStatus.textContent = '녹음 파일을 만드는 중입니다…';
-      else recordStatus.textContent = '● 녹음 중 0:00.0 · ' +
-        (recordSession.includeMr ? 'MR+목소리' : '목소리만');
+      else if (recordSession.phase === 'stopping') recordStatus.textContent = '녹음 구간을 정리하는 중입니다…';
+      else recordStatus.textContent = '● 구간 녹음 중 0:00.0';
     } else if (!supported) {
       recordStatus.textContent = '이 브라우저에서는 마이크 녹음을 사용할 수 없습니다';
     } else if (lastError) {
       recordStatus.textContent = lastError;
-    } else if (result) {
-      recordStatus.textContent = (result.notice ? result.notice + ' · ' : '녹음 완료 ') +
-        fmt(result.seconds) + ' · ' + (result.includeMr ? 'MR+목소리' : '목소리만') +
-        (result.saved ? ' · 기기에 저장됨' : ' · 기기에 저장하려면 [녹음 저장]');
+    } else if (clips.length) {
+      var totalSec = 0;
+      clips.forEach(function (c) { totalSec += c.buffer.duration; });
+      recordStatus.textContent = '녹음 구간 ' + clips.length + '개 · 소리 ' + fmt(totalSec) +
+        ' · 이어서 녹음하면 겹친 부분은 새 녹음으로 대체' +
+        (result.saved ? ' · 저장됨' : ' · [녹음 저장] = 한 파일로 합쳐 내려받기');
     } else if (speakerModeChk.checked) {
       recordStatus.textContent = '🔈 스피커 모드 — 에코 제거로 MR 유입을 줄입니다 (이어폰+모드 끔이 음질 최상) · 현재 재생 위치부터 녹음';
     } else {
@@ -2190,11 +2184,7 @@
     if (!session || session.resourcesReleased) return;
     session.resourcesReleased = true;
     if (session.autoStopTimer) clearTimeout(session.autoStopTimer);
-    try { if (session.mrRecordGain) session.mrRecordGain.disconnect(); } catch (e) {}
-    try { if (session.micSource) session.micSource.disconnect(); } catch (e) {}
-    try { if (session.mixBus) session.mixBus.disconnect(); } catch (e) {}
     stopMediaStream(session.micStream);
-    if (session.mixDest) stopMediaStream(session.mixDest.stream);
   }
   function finalizeRecording(session) {
     if (!session || session.finalized) return;
@@ -2222,37 +2212,56 @@
       flash(recordErrors[session.ownerKey]);
       return;
     }
-    var previousResult = recordResults[session.ownerKey];
-    if (previousResult && previousResult.url) URL.revokeObjectURL(previousResult.url);
-    var objectUrl = URL.createObjectURL(blob);
-    var filename = recordingFilename(mime);
-    var result = {
-      blob: blob,
-      seconds: Math.max(0, session.elapsed || 0),
-      includeMr: session.includeMr,
-      filename: filename,
-      notice: session.notice || '',
-      saved: false,
-      ownerKey: session.ownerKey,
-      url: objectUrl,
-      /* 타임라인에서의 시작 위치 — 싱크 보정으로 늦춘 만큼 앞으로 당겨 배치 */
-      startAt: (session.startOffset || 0) - (session.syncDelay || 0),
-      audioBuffer: null,
-      peaks: null
-    };
-    recordResults[session.ownerKey] = result;
+    /* 구간의 타임라인 시작 위치 — 기기 지연(싱크 보정)만큼 앞으로 당겨 배치 */
+    var clipStart = (session.startOffset || 0) - (session.syncDelay || 0);
+    var ownerKey = session.ownerKey;
     actx = actx || new AC();
     blob.arrayBuffer().then(function (buf) { return actx.decodeAudioData(buf); })
       .then(function (ab) {
-        if (recordResults[result.ownerKey] !== result) return;
-        result.audioBuffer = ab;
-        result.peaks = buildPeaks(ab);
+        addRecordingClip(ownerKey, { startAt: clipStart, buffer: ab, peaks: buildPeaks(ab) });
+        announceRecording(ownerKey, '구간이 트랙에 추가되었습니다.');
+      }).catch(function () {
+        recordErrors[ownerKey] = '녹음을 해석하지 못했습니다. 다시 시도해 주세요.';
         updateRecordUI();
-      }).catch(function () {});
-    delete recordErrors[session.ownerKey];
-    announceRecording(session.ownerKey, session.notice || '녹음이 완료되었습니다.');
+      });
+    delete recordErrors[ownerKey];
+    announceRecording(ownerKey, session.notice || '녹음이 완료되었습니다.');
     updateRecordUI();
-    flash('녹음이 완료되었습니다. 바로 듣거나 파일로 저장할 수 있습니다.');
+    flash('구간 녹음 완료 — 트랙의 녹음 레인에 쌓였습니다.');
+  }
+
+  function sliceClipBuffer(buffer, fromSec, toSec) {
+    var sr = buffer.sampleRate;
+    var from = Math.max(0, Math.floor(fromSec * sr));
+    var to = Math.min(buffer.length, Math.ceil(toSec * sr));
+    if (to - from < sr * 0.05) return null;   /* 0.05초 미만 조각은 버림 */
+    var out = actx.createBuffer(buffer.numberOfChannels, to - from, sr);
+    for (var ch = 0; ch < buffer.numberOfChannels; ch++) {
+      out.getChannelData(ch).set(buffer.getChannelData(ch).subarray(from, to));
+    }
+    return out;
+  }
+  /* 새 구간이 기존 구간과 겹치면 겹친 부분은 새 구간이 대체한다 (펀치인 녹음) */
+  function addRecordingClip(ownerKey, clip) {
+    var res = recordResults[ownerKey];
+    if (!res) res = recordResults[ownerKey] = { ownerKey: ownerKey, clips: [], saved: false, rev: 0, seq: 0 };
+    clip.seq = ++res.seq;
+    var s0 = clip.startAt, e0 = clip.startAt + clip.buffer.duration;
+    var next = [];
+    res.clips.forEach(function (old) {
+      var os = old.startAt, oe = old.startAt + old.buffer.duration;
+      if (oe <= s0 || os >= e0) { next.push(old); return; }
+      var left = os < s0 ? sliceClipBuffer(old.buffer, 0, s0 - os) : null;
+      if (left) next.push({ startAt: os, buffer: left, peaks: buildPeaks(left), seq: old.seq });
+      var right = oe > e0 ? sliceClipBuffer(old.buffer, e0 - os, oe - os) : null;
+      if (right) next.push({ startAt: e0, buffer: right, peaks: buildPeaks(right), seq: old.seq });
+    });
+    next.push(clip);
+    next.sort(function (a, b) { return a.startAt - b.startAt; });
+    res.clips = next;
+    res.saved = false;
+    res.rev = (res.rev || 0) + 1;
+    updateRecordUI();
   }
   function stopRecording(discard) {
     var session = recordSession;
@@ -2306,16 +2315,12 @@
     if (!tracks.mr.buffer) { flash('먼저 MR을 불러오세요.'); return; }
     if (!recordingSupported()) { flash('이 브라우저는 마이크 녹음을 지원하지 않습니다.'); return; }
     var ownerKey = currentRecordingOwnerKey();
-    var previousResult = recordResults[ownerKey];
-    if (previousResult && !previousResult.saved &&
-        !window.confirm('기존 녹음을 아직 기기에 저장하지 않았습니다. 새 녹음으로 바꿀까요?')) return;
-    if (!recordPreview.paused) recordPreview.pause();
     delete recordErrors[ownerKey];
 
     var requestedOffset = curTime();
     var session = {
       phase: 'requesting', cancelled: false, discard: false, chunks: [], bytes: 0,
-      includeMr: !!recordMix.checked, requestedOffset: requestedOffset,
+      requestedOffset: requestedOffset,
       ownerKey: ownerKey,
       previousTrackState: { orig: tracks.orig.on, mr: tracks.mr.on }
     };
@@ -2355,22 +2360,9 @@
       return ensureAudioRunning().then(function () { return stream; });
     }).then(function (stream) {
       if (!stream || recordSession !== session || session.cancelled) return;
-      var recorderStream = stream;
+      /* 마이크 소리만 녹음한다. MR은 [녹음 저장]으로 합칠 때 섞는다 */
       session.syncDelay = recordingSyncDelay(stream);
-      if (session.includeMr) {
-        session.mixDest = actx.createMediaStreamDestination();
-        session.mixBus = actx.createDynamicsCompressor();
-        session.mixBus.threshold.value = -6;
-        session.mixBus.knee.value = 12;
-        session.mixBus.ratio.value = 4;
-        session.mixBus.attack.value = 0.003;
-        session.mixBus.release.value = 0.25;
-        session.mixBus.connect(session.mixDest);
-        session.micSource = actx.createMediaStreamSource(stream);
-        session.micSource.connect(session.mixBus);
-        recorderStream = session.mixDest.stream;
-      }
-      session.recorder = new MediaRecorder(recorderStream, recordingOptions());
+      session.recorder = new MediaRecorder(stream, recordingOptions());
       session.recorder.ondataavailable = function (e) {
         if (!e.data || !e.data.size) return;
         session.chunks.push(e.data);
@@ -2406,9 +2398,7 @@
       tracks.mr.on = true;
       session.phase = 'recording';
       recordBtn.blur();
-      announceRecording(session.ownerKey, session.includeMr
-        ? 'MR과 목소리 녹음을 시작했습니다.'
-        : '목소리 녹음을 시작했습니다.');
+      announceRecording(session.ownerKey, '구간 녹음을 시작했습니다.');
       updateTrackUI();
       drawWave();
       session.recorder.start(500);
@@ -2420,7 +2410,7 @@
       }, Math.max(100, (session.endAt - session.startOffset) * 1000 + 100));
       setPlayLabel('⏸ 일시정지');
       if (!rafId) rafId = requestAnimationFrame(rafLoop);
-      flash(session.includeMr ? 'MR과 목소리를 함께 녹음합니다.' : 'MR을 들으며 목소리만 녹음합니다.');
+      flash('구간 녹음 중 — 정지하면 트랙에 쌓이고, 겹친 부분은 새 녹음이 대체합니다.');
     }).catch(function (e) { failRecording(session, e); });
   }
   recordBtn.addEventListener('click', function () {
@@ -2441,18 +2431,105 @@
   });
   recordDelete.addEventListener('click', function () {
     var result = currentRecordResult();
-    if (result && !result.saved && !window.confirm('아직 기기에 저장하지 않은 녹음을 삭제할까요?')) return;
+    if (!result || !result.clips.length) return;
+    if (!result.saved &&
+        !window.confirm('저장하지 않은 녹음 구간 ' + result.clips.length + '개를 모두 삭제할까요?')) return;
     clearRecordingOutput();
-    flash('녹음 파일을 삭제했습니다.');
+    flash('녹음 구간을 모두 삭제했습니다.');
   });
-  recordDownload.addEventListener('click', function () {
+  recordUndo.addEventListener('click', function () {
     var result = currentRecordResult();
-    if (!result) return;
-    result.saved = true;
+    if (!result || !result.clips.length) return;
+    var lastIdx = 0;
+    result.clips.forEach(function (c, i) {
+      if ((c.seq || 0) >= (result.clips[lastIdx].seq || 0)) lastIdx = i;
+    });
+    if (playing) pauseTimelinePlayback();
+    result.clips.splice(lastIdx, 1);
+    result.saved = false;
+    result.rev = (result.rev || 0) + 1;
     updateRecordUI();
+    flash('가장 최근 녹음 구간을 지웠습니다.');
   });
-  recordPreview.addEventListener('play', function () {
-    if ((playing || playStarting) && !recordSession) pauseTimelinePlayback();
+
+  /* 모든 구간(+선택 시 MR)을 오프라인 렌더링으로 한 파일에 합쳐 WAV로 내려받는다 */
+  function encodeWav(buffer) {
+    var ch = Math.min(2, buffer.numberOfChannels), sr = buffer.sampleRate, len = buffer.length;
+    var bytes = 44 + len * ch * 2;
+    var ab = new ArrayBuffer(bytes), dv = new DataView(ab);
+    function wstr(off, s) { for (var i = 0; i < s.length; i++) dv.setUint8(off + i, s.charCodeAt(i)); }
+    wstr(0, 'RIFF'); dv.setUint32(4, bytes - 8, true); wstr(8, 'WAVE');
+    wstr(12, 'fmt '); dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, ch, true);
+    dv.setUint32(24, sr, true); dv.setUint32(28, sr * ch * 2, true); dv.setUint16(32, ch * 2, true);
+    dv.setUint16(34, 16, true);
+    wstr(36, 'data'); dv.setUint32(40, len * ch * 2, true);
+    var off = 44;
+    for (var i2 = 0; i2 < len; i2++) {
+      for (var c = 0; c < ch; c++) {
+        var v = Math.max(-1, Math.min(1, buffer.getChannelData(c)[i2]));
+        dv.setInt16(off, v < 0 ? v * 0x8000 : v * 0x7FFF, true);
+        off += 2;
+      }
+    }
+    return new Blob([ab], { type: 'audio/wav' });
+  }
+  recordExport.addEventListener('click', function () {
+    var result = currentRecordResult();
+    if (!result || !result.clips.length || recordSession) return;
+    var withMr = recordMix.checked && tracks.mr.buffer;
+    var end = 0;
+    result.clips.forEach(function (c) {
+      end = Math.max(end, Math.max(0, c.startAt) + c.buffer.duration);
+    });
+    if (withMr) end = Math.max(end, tracks.mr.buffer.duration);
+    var sr = 44100;
+    var oc = new OfflineAudioContext(2, Math.max(sr, Math.ceil(end * sr)), sr);
+    var out = oc.destination;
+    if (withMr) {
+      /* 실시간 녹음 합본과 같은 밸런스: MR 0.72 + 컴프레서 */
+      var comp = oc.createDynamicsCompressor();
+      comp.threshold.value = -6;
+      comp.knee.value = 12;
+      comp.ratio.value = 4;
+      comp.attack.value = 0.003;
+      comp.release.value = 0.25;
+      comp.connect(oc.destination);
+      out = comp;
+      var mg = oc.createGain();
+      mg.gain.value = 0.72;
+      mg.connect(out);
+      var ms = oc.createBufferSource();
+      ms.buffer = tracks.mr.buffer;
+      ms.connect(mg);
+      ms.start(0);
+    }
+    result.clips.forEach(function (c) {
+      var s = oc.createBufferSource();
+      s.buffer = c.buffer;
+      s.connect(out);
+      if (c.startAt >= 0) s.start(c.startAt);
+      else s.start(0, -c.startAt);
+    });
+    recordExport.disabled = true;
+    recordExport.textContent = '파일 만드는 중…';
+    oc.startRendering().then(function (rendered) {
+      var wav = encodeWav(rendered);
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(wav);
+      a.download = recordingFilename('audio/wav');
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(function () { URL.revokeObjectURL(a.href); }, 30000);
+      result.saved = true;
+      flash('녹음 구간을 한 파일로 합쳐 내려받았습니다' + (withMr ? ' (MR 포함)' : ' (목소리만)') + '.');
+    }).catch(function (e) {
+      flash('저장 실패: ' + ((e && e.message) || e));
+    }).then(function () {
+      recordExport.disabled = false;
+      recordExport.textContent = '녹음 저장';
+      updateRecordUI();
+    });
   });
 
   function loadTrack(k, blob, name, persist, expectedUid, expectedGeneration, expectedToken,
@@ -2559,21 +2636,36 @@
     ctx.fillStyle = ink;
     ctx.fillRect(0, 53, w, 1);
     ctx.fillRect(0, 94, w, 1);
-    /* 세 레인: 원곡 / MR / 녹음 (꺼진 트랙은 흐리게) */
-    [['orig', 33, ink], ['mr', 74, acc], ['rec', 115, '#C65850']].forEach(function (lane) {
+    /* 세 레인: 원곡 / MR / 녹음 구간들 (꺼진 트랙은 흐리게) */
+    var laneJobs = [];
+    [['orig', 33, ink], ['mr', 74, acc]].forEach(function (lane) {
       var tr = tracks[lane[0]];
-      if (!tr.peaks) return;
-      var mid = lane[1], half = 19, startAt = tr.startAt || 0;
-      ctx.fillStyle = lane[2];
-      ctx.globalAlpha = tr.on ? 0.75 : 0.22;
-      for (var x2 = 0; x2 < w; x2++) {
-        var b0 = Math.floor((x2 / pps - startAt) * tr.peaks.perSec);
-        var b1 = Math.max(b0 + 1, Math.floor(((x2 + 1) / pps - startAt) * tr.peaks.perSec));
+      if (tr.peaks) laneJobs.push({ mid: lane[1], color: lane[2], on: tr.on, peaks: tr.peaks, startAt: 0 });
+    });
+    tracks.rec.clips.forEach(function (c) {
+      if (c.peaks) laneJobs.push({ mid: 115, color: '#C65850', on: tracks.rec.on, peaks: c.peaks, startAt: c.startAt, clipEdge: true });
+    });
+    laneJobs.forEach(function (job) {
+      var mid = job.mid, half = 19, startAt = job.startAt;
+      var span = job.peaks.mins.length / job.peaks.perSec;
+      var xFrom = Math.max(0, Math.floor(startAt * pps));
+      var xTo = Math.min(w, Math.ceil((startAt + span) * pps));
+      ctx.fillStyle = job.color;
+      if (job.clipEdge) {
+        /* 구간 경계 표시 */
+        ctx.globalAlpha = 0.4;
+        ctx.fillRect(xFrom, mid - half, 1, half * 2);
+        ctx.fillRect(Math.max(xFrom, xTo - 1), mid - half, 1, half * 2);
+      }
+      ctx.globalAlpha = job.on ? 0.75 : 0.22;
+      for (var x2 = xFrom; x2 < xTo; x2++) {
+        var b0 = Math.floor((x2 / pps - startAt) * job.peaks.perSec);
+        var b1 = Math.max(b0 + 1, Math.floor(((x2 + 1) / pps - startAt) * job.peaks.perSec));
         if (b1 <= 0) continue;
         var lo2 = 1, hi2 = -1;
-        for (var b = Math.max(0, b0); b < b1 && b < tr.peaks.mins.length; b++) {
-          if (tr.peaks.mins[b] < lo2) lo2 = tr.peaks.mins[b];
-          if (tr.peaks.maxs[b] > hi2) hi2 = tr.peaks.maxs[b];
+        for (var b = Math.max(0, b0); b < b1 && b < job.peaks.mins.length; b++) {
+          if (job.peaks.mins[b] < lo2) lo2 = job.peaks.mins[b];
+          if (job.peaks.maxs[b] > hi2) hi2 = job.peaks.maxs[b];
         }
         if (hi2 < lo2) continue;
         var y0 = mid - hi2 * half;
@@ -2724,8 +2816,7 @@
       }
     }
     if (recordSession && recordSession.phase === 'recording') {
-      recordStatus.textContent = '● 녹음 중 ' + fmt(Math.max(0, t - recordSession.startOffset)) + ' · ' +
-        (recordSession.includeMr ? 'MR+목소리' : '목소리만');
+      recordStatus.textContent = '● 구간 녹음 중 ' + fmt(Math.max(0, t - recordSession.startOffset));
     }
   }
   function rafLoop() {
@@ -2982,7 +3073,6 @@
 
   function gateShow(msg, actions) {
     actions = actions || {};
-    try { recordPreview.pause(); } catch (e) {}
     if (recordSession) {
       if (recordSession.phase === 'recording') recordSession.notice = '클라우드 안내로 녹음을 종료했습니다';
       stopRecording(false);
@@ -4106,7 +4196,8 @@
   });
   window.addEventListener('beforeunload', function (e) {
     var hasUnsavedResult = Object.keys(recordResults).some(function (key) {
-      return recordResults[key] && !recordResults[key].saved;
+      var r = recordResults[key];
+      return r && r.clips && r.clips.length && !r.saved;
     });
     if (!recordSession && !hasUnsavedResult) return;
     e.preventDefault();
@@ -4353,7 +4444,6 @@
     return code;
   }
   function clearAudioTracks() {
-    try { recordPreview.pause(); } catch (e) {}
     if (recordSession) {
       if (recordSession.phase === 'recording') recordSession.notice = '오디오 초기화로 녹음을 종료했습니다';
       stopRecording(false);
@@ -4371,10 +4461,10 @@
       tracks[k].peaks = null;
       tracks[k].on = true;
     });
-    tracks.rec.buffer = null;
-    tracks.rec.peaks = null;
+    tracks.rec.clips = [];
+    tracks.rec.srcs = [];
     tracks.rec.name = '';
-    tracks.rec.startAt = 0;
+    tracks.rec.sig = '';
     tracks.rec.on = true;
     updateTrackUI();
     updateRecordUI();
