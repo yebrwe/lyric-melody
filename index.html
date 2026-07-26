@@ -376,8 +376,11 @@
     textarea, .gridlab input[type="number"] { font-size: 16px; }
     .gridlab input[type="number"] { min-height: 36px; }
     .status { flex-basis: 100%; margin-left: 0; white-space: normal; }
-    /* 곡 분석(BPM·첫 박·격자)은 PC에서 맞춰두는 값이라 모바일에서는 숨긴다 */
-    #timeControls .analysis { display: none; }
+    /* 곡 분석·배치·음 편집은 PC에서 하는 작업이라 모바일 타임라인은
+       재생·녹음 전용으로 정리한다 */
+    #timeControls .analysis,
+    #timeControls .editctl,
+    .queue { display: none !important; }
   }
 
   @media print {
@@ -477,15 +480,15 @@
       <span id="timeDisp" class="status" style="margin-left:0">0:00.0 / 0:00.0</span>
       <button class="btn" id="zoomOut">− 축소</button>
       <button class="btn" id="zoomIn">＋ 확대</button>
-      <button class="btn primary" id="tapBtn" disabled>다음 글자 찍기 (Enter)</button>
-      <button class="btn" id="shiftL" title="배치된 글자 전체를 왼쪽으로 16비트 1칸 (Shift+클릭 = 1박)">전체 ◀</button>
-      <button class="btn" id="shiftR" title="배치된 글자 전체를 오른쪽으로 16비트 1칸 (Shift+클릭 = 1박)">전체 ▶</button>
-      <button class="btn" id="tlUp" title="선택한 음에 위 계단 (↑)">계단 ▲</button>
-      <button class="btn" id="tlDown" title="선택한 음에 아래 계단 (↓)">계단 ▼</button>
-      <button class="btn" id="tlDel" title="선택한 음 삭제 (Delete)">음 삭제</button>
-      <button class="btn" id="tlVibDown" title="선택한 음의 바이브레이션 -1">바이브 −</button>
-      <button class="btn" id="tlVibUp" title="선택한 음의 바이브레이션 +1">바이브 ＋</button>
-      <button class="btn" id="clearTimes">배치 전체 지우기</button>
+      <button class="btn primary editctl" id="tapBtn" disabled>다음 글자 찍기 (Enter)</button>
+      <button class="btn editctl" id="shiftL" title="배치된 글자 전체를 왼쪽으로 16비트 1칸 (Shift+클릭 = 1박)">전체 ◀</button>
+      <button class="btn editctl" id="shiftR" title="배치된 글자 전체를 오른쪽으로 16비트 1칸 (Shift+클릭 = 1박)">전체 ▶</button>
+      <button class="btn editctl" id="tlUp" title="선택한 음에 위 계단 (↑)">계단 ▲</button>
+      <button class="btn editctl" id="tlDown" title="선택한 음에 아래 계단 (↓)">계단 ▼</button>
+      <button class="btn editctl" id="tlDel" title="선택한 음 삭제 (Delete)">음 삭제</button>
+      <button class="btn editctl" id="tlVibDown" title="선택한 음의 바이브레이션 -1">바이브 −</button>
+      <button class="btn editctl" id="tlVibUp" title="선택한 음의 바이브레이션 +1">바이브 ＋</button>
+      <button class="btn editctl" id="clearTimes">배치 전체 지우기</button>
       <span id="audioName" class="audioname">오디오 없음</span>
     </div>
     <div class="recordbar" id="recordControls" hidden>
