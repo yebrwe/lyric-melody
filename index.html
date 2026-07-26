@@ -1673,6 +1673,7 @@
       saveSongLibrary(owner);
       delete recordResults[recordKey];
       delete recordErrors[recordKey];
+      idbDelete(REC_CLIPS_PREFIX + recordKey).catch(function () {});
       renderSongLibrary();
       updateRecordUI();
       if (fb.user && fb.syncReady) pushSong(songId, true, { archived: true });
@@ -2120,6 +2121,7 @@
     var ownerKey = currentRecordingOwnerKey();
     delete recordResults[ownerKey];
     delete recordErrors[ownerKey];
+    idbDelete(REC_CLIPS_PREFIX + ownerKey).catch(function () {});
     updateRecordUI();
   }
   function updateRecordUI() {
@@ -2129,6 +2131,7 @@
     var result = currentRecordResult();
     var lastError = recordErrors[currentRecordingOwnerKey()] || '';
     var clips = result ? result.clips : [];
+    restoreRecClips();
     syncRecTrack();
     recordBtn.classList.toggle('recording', active);
     recordBtn.setAttribute('aria-pressed', active ? 'true' : 'false');
@@ -2157,7 +2160,7 @@
       var totalSec = 0;
       clips.forEach(function (c) { totalSec += c.buffer.duration; });
       recordStatus.textContent = '녹음 구간 ' + clips.length + '개 · 소리 ' + fmt(totalSec) +
-        ' · 이어서 녹음하면 겹친 부분은 새 녹음으로 대체' +
+        ' · 트랙의 구간 클릭 = 부분 삭제' +
         (result.saved ? ' · 저장됨' : ' · [녹음 저장] = 한 파일로 합쳐 내려받기');
     } else if (speakerModeChk.checked) {
       recordStatus.textContent = '🔈 스피커 모드 — 에코 제거로 MR 유입을 줄입니다 (이어폰+모드 끔이 음질 최상) · 현재 재생 위치부터 녹음';
@@ -2244,6 +2247,52 @@
     }
     return out;
   }
+  /* ---- 녹음 구간 보관: 새로고침해도 남도록 IndexedDB에 WAV로 저장 ---- */
+  var REC_CLIPS_PREFIX = 'rec-clips-v1:';
+  var recRestoreAttempted = {};
+  function persistRecClips(ownerKey) {
+    var res = recordResults[ownerKey];
+    var key = REC_CLIPS_PREFIX + ownerKey;
+    if (!res || !res.clips.length) {
+      idbDelete(key).catch(function () {});
+      return;
+    }
+    var payload = {
+      saved: !!res.saved,
+      clips: res.clips.map(function (c) {
+        return { startAt: c.startAt, seq: c.seq || 0, blob: encodeWav(c.buffer) };
+      })
+    };
+    idbPut(key, payload).catch(function (e) {
+      reportAudioCacheError('녹음 구간을 이 브라우저에 보관하지 못했습니다', e);
+    });
+  }
+  function restoreRecClips() {
+    var ownerKey = currentRecordingOwnerKey();
+    if (recordResults[ownerKey] || recRestoreAttempted[ownerKey]) return;
+    recRestoreAttempted[ownerKey] = true;
+    idbGetP(REC_CLIPS_PREFIX + ownerKey).then(function (payload) {
+      if (!payload || !payload.clips || !payload.clips.length || recordResults[ownerKey]) return;
+      actx = actx || new AC();
+      return Promise.all(payload.clips.map(function (c) {
+        return c.blob.arrayBuffer()
+          .then(function (buf) { return actx.decodeAudioData(buf); })
+          .then(function (ab) {
+            return { startAt: c.startAt, seq: c.seq || 0, buffer: ab, peaks: buildPeaks(ab) };
+          });
+      })).then(function (clips) {
+        if (recordResults[ownerKey]) return;
+        clips.sort(function (a, b) { return a.startAt - b.startAt; });
+        var maxSeq = 0;
+        clips.forEach(function (c) { maxSeq = Math.max(maxSeq, c.seq); });
+        recordResults[ownerKey] = {
+          ownerKey: ownerKey, clips: clips, saved: !!payload.saved, rev: 1, seq: maxSeq
+        };
+        if (ownerKey === currentRecordingOwnerKey()) updateRecordUI();
+      });
+    }).catch(function () {});
+  }
+
   /* 새 구간이 기존 구간과 겹치면 겹친 부분은 새 구간이 대체한다 (펀치인 녹음) */
   function addRecordingClip(ownerKey, clip) {
     var res = recordResults[ownerKey];
@@ -2265,6 +2314,7 @@
     res.saved = false;
     res.rev = (res.rev || 0) + 1;
     updateRecordUI();
+    persistRecClips(ownerKey);
   }
   function stopRecording(discard) {
     var session = recordSession;
@@ -2452,6 +2502,7 @@
     result.saved = false;
     result.rev = (result.rev || 0) + 1;
     updateRecordUI();
+    persistRecClips(result.ownerKey);
     flash('가장 최근 녹음 구간을 지웠습니다.');
   });
 
@@ -2525,6 +2576,7 @@
       a.remove();
       setTimeout(function () { URL.revokeObjectURL(a.href); }, 30000);
       result.saved = true;
+      persistRecClips(result.ownerKey);
       flash('녹음 구간을 한 파일로 합쳐 내려받았습니다' + (withMr ? ' (MR 포함)' : ' (목소리만)') + '.');
     }).catch(function (e) {
       flash('저장 실패: ' + ((e && e.message) || e));
@@ -2906,7 +2958,30 @@
     tlInner.classList.remove('panning');
     if (pan && !pan.moved) {
       var rect = tlInner.getBoundingClientRect();
-      seekTo((e.clientX - rect.left) / pps);
+      var t = (e.clientX - rect.left) / pps;
+      var y = e.clientY - rect.top;
+      /* 녹음 레인(96~134px)의 구간을 클릭하면 그 구간만 삭제 제안 */
+      var hit = null;
+      var res = currentRecordResult();
+      if (y >= 96 && y <= 134 && !recordSession && res) {
+        res.clips.forEach(function (c) {
+          if (t >= c.startAt && t <= c.startAt + c.buffer.duration) hit = c;
+        });
+      }
+      if (hit) {
+        if (window.confirm('녹음 구간 ' + fmt(Math.max(0, hit.startAt)) + ' ~ ' +
+            fmt(hit.startAt + hit.buffer.duration) + ' 을 삭제할까요?')) {
+          if (playing) pauseTimelinePlayback();
+          res.clips.splice(res.clips.indexOf(hit), 1);
+          res.saved = false;
+          res.rev = (res.rev || 0) + 1;
+          updateRecordUI();
+          persistRecClips(res.ownerKey);
+          flash('녹음 구간을 삭제했습니다.');
+        }
+      } else {
+        seekTo(t);
+      }
     }
     pan = null;
   }
@@ -4197,12 +4272,9 @@
       }
     }
   });
+  /* 녹음 구간은 브라우저에 보관되어 새로고침해도 남으므로, 녹음이 진행 중일 때만 경고 */
   window.addEventListener('beforeunload', function (e) {
-    var hasUnsavedResult = Object.keys(recordResults).some(function (key) {
-      var r = recordResults[key];
-      return r && r.clips && r.clips.length && !r.saved;
-    });
-    if (!recordSession && !hasUnsavedResult) return;
+    if (!recordSession) return;
     e.preventDefault();
     e.returnValue = '';
   });
