@@ -494,7 +494,10 @@
       <label class="gridlab" title="녹음 파일에서 내 목소리가 MR보다 늦게 들리면 값을 키우고, 빠르면 줄이세요. 기기 지연은 자동 보정되고 이 값은 추가 미세 조정입니다">
         싱크 보정 <input type="number" id="recordSyncMs" value="0" min="-500" max="500" step="10">ms
       </label>
-      <span class="record-note" id="recordStatus">🎧 이어폰 필수 — 스피커로 들으면 MR이 마이크에 같이 녹음됩니다 · 현재 재생 위치부터 녹음</span>
+      <label class="gridlab" title="이어폰이 없어 스피커로 MR을 들을 때 켜세요. 에코 제거로 스피커 소리가 마이크에 섞이는 걸 줄여줍니다 (음질은 이어폰+끔이 가장 좋습니다)">
+        <input type="checkbox" id="speakerMode"> 스피커 녹음 모드
+      </label>
+      <span class="record-note" id="recordStatus">🎧 이어폰 권장 — 스피커 사용 시 [스피커 녹음 모드]를 켜세요 · 현재 재생 위치부터 녹음</span>
       <span class="sr-only" id="recordAnnounce" role="status" aria-live="polite"></span>
       <audio id="recordPreview" controls preload="metadata" hidden></audio>
       <a class="btn" id="recordDownload" href="#" download hidden style="text-decoration:none">녹음 저장</a>
@@ -1702,7 +1705,7 @@
     editPlayBtn = $('editPlayBtn'), editHomeBtn = $('editHomeBtn'), editTimeDisp = $('editTimeDisp'),
     timeDisp = $('timeDisp'), queueEl = $('queue'), recordControls = $('recordControls'),
     recordBtn = $('recordBtn'), recordMix = $('recordMix'), recordSyncMsIn = $('recordSyncMs'),
-    recordStatus = $('recordStatus'),
+    speakerModeChk = $('speakerMode'), recordStatus = $('recordStatus'),
     recordPreview = $('recordPreview'), recordDownload = $('recordDownload'),
     recordDelete = $('recordDelete'), recordAnnounce = $('recordAnnounce');
   /* 트랙 배율(px/초): 기본은 한 단계 확대(120), 조작한 배율은 기억 */
@@ -2137,7 +2140,7 @@
       (busy && recordSession.phase === 'requesting' ? '마이크 준비 중…' :
         (busy ? '녹음 정리 중…' : '● MR 녹음'));
     recordBtn.disabled = busy ? !active : (!supported || !tracks.mr.buffer);
-    recordMix.disabled = recordSyncMsIn.disabled = busy;
+    recordMix.disabled = recordSyncMsIn.disabled = speakerModeChk.disabled = busy;
     $('fileOrig').disabled = $('fileMr').disabled = busy;
     $('homeBtn').disabled = busy || !anyLoaded();
     $('muteOrig').disabled = busy || !tracks.orig.buffer;
@@ -2159,8 +2162,10 @@
       recordStatus.textContent = (result.notice ? result.notice + ' · ' : '녹음 완료 ') +
         fmt(result.seconds) + ' · ' + (result.includeMr ? 'MR+목소리' : '목소리만') +
         (result.saved ? ' · 기기에 저장됨' : ' · 기기에 저장하려면 [녹음 저장]');
+    } else if (speakerModeChk.checked) {
+      recordStatus.textContent = '🔈 스피커 모드 — 에코 제거로 MR 유입을 줄입니다 (이어폰+모드 끔이 음질 최상) · 현재 재생 위치부터 녹음';
     } else {
-      recordStatus.textContent = '🎧 이어폰 필수 — 스피커로 들으면 MR이 마이크에 같이 녹음됩니다 · 현재 재생 위치부터 녹음';
+      recordStatus.textContent = '🎧 이어폰 권장 — 스피커 사용 시 [스피커 녹음 모드]를 켜세요 · 현재 재생 위치부터 녹음';
     }
   }
   function pauseTimelinePlayback() {
@@ -2320,10 +2325,12 @@
 
     Promise.resolve().then(function () { return ensureAudioRunning(); }).then(function () {
       if (recordSession !== session || session.cancelled) return null;
-      /* 통화용 음성 처리(에코 제거·노이즈 억제·자동 게인)는 노래를 뭉개므로 끈다.
-         대신 스피커 재생분이 마이크에 섞이니 이어폰 사용이 필수다. */
+      /* 통화용 음성 처리(에코 제거·노이즈 억제·자동 게인)는 노래를 뭉개므로 기본은 끈다.
+         이어폰이 없어 스피커로 듣는 경우엔 [스피커 녹음 모드]로 에코 제거를 켜
+         스피커 MR이 마이크에 섞이는 것을 줄인다 (음질은 이어폰 쪽이 좋다). */
+      var speaker = speakerModeChk.checked;
       return navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+        audio: { echoCancellation: speaker, noiseSuppression: speaker, autoGainControl: false }
       });
     }).then(function (stream) {
       if (!stream) return null;
@@ -2421,6 +2428,11 @@
     else if (!recordSession) startRecording();
   });
   try { recordSyncMsIn.value = String(clamp(Math.round(+localStorage.getItem('record-sync-ms') || 0), -500, 500)); } catch (e) {}
+  try { speakerModeChk.checked = localStorage.getItem('record-speaker-mode') === '1'; } catch (e) {}
+  speakerModeChk.addEventListener('change', function () {
+    try { localStorage.setItem('record-speaker-mode', this.checked ? '1' : '0'); } catch (e) {}
+    updateRecordUI();
+  });
   recordSyncMsIn.addEventListener('change', function () {
     var v = clamp(Math.round(+this.value || 0), -500, 500);
     this.value = String(v);
