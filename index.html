@@ -370,6 +370,12 @@
     .song-dialog { width: 100vw; max-width: none; max-height: 80dvh; margin: auto 0 0; border-radius: 14px 14px 0 0; border-bottom: 0; }
     .song-row { padding: 3px; }
     .song-select { min-height: 52px; }
+    /* 손가락으로 누르기 쉽게 버튼을 키우고, 입력칸은 iOS 자동 확대(16px 미만 폰트)를 막는다 */
+    .btn { display: inline-flex; align-items: center; justify-content: center; min-height: 40px; padding: 6px 12px; }
+    .group { flex-wrap: wrap; }
+    textarea, .gridlab input[type="number"] { font-size: 16px; }
+    .gridlab input[type="number"] { min-height: 36px; }
+    .status { flex-basis: 100%; margin-left: 0; white-space: normal; }
   }
 
   @media print {
@@ -472,6 +478,9 @@
       <button class="btn primary" id="tapBtn" disabled>다음 글자 찍기 (Enter)</button>
       <button class="btn" id="shiftL" title="배치된 글자 전체를 왼쪽으로 16비트 1칸 (Shift+클릭 = 1박)">전체 ◀</button>
       <button class="btn" id="shiftR" title="배치된 글자 전체를 오른쪽으로 16비트 1칸 (Shift+클릭 = 1박)">전체 ▶</button>
+      <button class="btn" id="tlUp" title="선택한 음에 위 계단 (↑)">계단 ▲</button>
+      <button class="btn" id="tlDown" title="선택한 음에 아래 계단 (↓)">계단 ▼</button>
+      <button class="btn" id="tlDel" title="선택한 음 삭제 (Delete)">음 삭제</button>
       <button class="btn" id="tlVibDown" title="선택한 음의 바이브레이션 -1">바이브 −</button>
       <button class="btn" id="tlVibUp" title="선택한 음의 바이브레이션 +1">바이브 ＋</button>
       <button class="btn" id="clearTimes">배치 전체 지우기</button>
@@ -481,6 +490,9 @@
       <button class="btn" id="recordBtn" disabled aria-pressed="false">● MR 녹음</button>
       <label class="gridlab" title="켜면 MR과 목소리가 한 파일로 저장되고, 끄면 목소리만 저장됩니다">
         <input type="checkbox" id="recordMix" checked> 녹음 파일에 MR 포함
+      </label>
+      <label class="gridlab" title="녹음 파일에서 내 목소리가 MR보다 늦게 들리면 값을 키우고, 빠르면 줄이세요. 기기 지연은 자동 보정되고 이 값은 추가 미세 조정입니다">
+        싱크 보정 <input type="number" id="recordSyncMs" value="0" min="-500" max="500" step="10">ms
       </label>
       <span class="record-note" id="recordStatus">🎧 유선 이어폰 권장 · 현재 재생 위치부터 녹음합니다</span>
       <span class="sr-only" id="recordAnnounce" role="status" aria-live="polite"></span>
@@ -1688,7 +1700,8 @@
     audioNameEl = $('audioName'), playBtn = $('playBtn'), tapBtn = $('tapBtn'),
     editPlayBtn = $('editPlayBtn'), editHomeBtn = $('editHomeBtn'), editTimeDisp = $('editTimeDisp'),
     timeDisp = $('timeDisp'), queueEl = $('queue'), recordControls = $('recordControls'),
-    recordBtn = $('recordBtn'), recordMix = $('recordMix'), recordStatus = $('recordStatus'),
+    recordBtn = $('recordBtn'), recordMix = $('recordMix'), recordSyncMsIn = $('recordSyncMs'),
+    recordStatus = $('recordStatus'),
     recordPreview = $('recordPreview'), recordDownload = $('recordDownload'),
     recordDelete = $('recordDelete'), recordAnnounce = $('recordAnnounce');
   /* 트랙 배율(px/초): 기본은 한 단계 확대(120), 조작한 배율은 기억 */
@@ -1873,7 +1886,14 @@
         var recordMrGain = actx.createGain();
         recordMrGain.gain.value = 0.72;
         g.connect(recordMrGain);
-        recordMrGain.connect(recordSession.mixBus || recordSession.mixDest);
+        var mixTail = recordMrGain;
+        if (recordSession.syncDelay > 0) {
+          var syncNode = actx.createDelay(1.0);
+          syncNode.delayTime.value = recordSession.syncDelay;
+          recordMrGain.connect(syncNode);
+          mixTail = syncNode;
+        }
+        mixTail.connect(recordSession.mixBus || recordSession.mixDest);
         recordSession.mrRecordGain = recordMrGain;
       }
       s.start(0, playOff);
@@ -1975,6 +1995,20 @@
       return actx;
     });
   }
+  /* 스피커로 나가는 시간(출력 지연) + 마이크로 들어오는 시간(입력 지연)만큼
+     녹음 믹스의 MR을 늦춰, 녹음 파일에서 목소리가 뒤로 밀리는 현상을 상쇄한다.
+     기기가 지연을 알려주지 않으면 수동 보정(ms)만 적용된다. */
+  function recordingSyncDelay(stream) {
+    var out = 0, inp = 0;
+    if (typeof actx.outputLatency === 'number' && isFinite(actx.outputLatency)) out = actx.outputLatency;
+    if (!out && typeof actx.baseLatency === 'number' && isFinite(actx.baseLatency)) out = actx.baseLatency;
+    try {
+      var s = stream.getAudioTracks()[0].getSettings();
+      if (typeof s.latency === 'number' && isFinite(s.latency)) inp = s.latency;
+    } catch (e) {}
+    var manual = (parseFloat(recordSyncMsIn.value) || 0) / 1000;
+    return clamp(out + inp + manual, 0, 0.9);
+  }
   function stopMediaStream(stream) {
     if (!stream || !stream.getTracks) return;
     stream.getTracks().forEach(function (track) {
@@ -2072,7 +2106,7 @@
       (busy && recordSession.phase === 'requesting' ? '마이크 준비 중…' :
         (busy ? '녹음 정리 중…' : '● MR 녹음'));
     recordBtn.disabled = busy ? !active : (!supported || !tracks.mr.buffer);
-    recordMix.disabled = busy;
+    recordMix.disabled = recordSyncMsIn.disabled = busy;
     $('fileOrig').disabled = $('fileMr').disabled = busy;
     $('homeBtn').disabled = busy || !anyLoaded();
     $('muteOrig').disabled = busy || !tracks.orig.buffer;
@@ -2269,6 +2303,7 @@
       if (!stream || recordSession !== session || session.cancelled) return;
       var recorderStream = stream;
       if (session.includeMr) {
+        session.syncDelay = recordingSyncDelay(stream);
         session.mixDest = actx.createMediaStreamDestination();
         session.mixBus = actx.createDynamicsCompressor();
         session.mixBus.threshold.value = -6;
@@ -2337,6 +2372,13 @@
   recordBtn.addEventListener('click', function () {
     if (recordSession && recordSession.phase === 'recording') stopRecording(false);
     else if (!recordSession) startRecording();
+  });
+  try { recordSyncMsIn.value = String(clamp(Math.round(+localStorage.getItem('record-sync-ms') || 0), -500, 500)); } catch (e) {}
+  recordSyncMsIn.addEventListener('change', function () {
+    var v = clamp(Math.round(+this.value || 0), -500, 500);
+    this.value = String(v);
+    try { localStorage.setItem('record-sync-ms', String(v)); } catch (e) {}
+    flash('다음 녹음부터 싱크 보정 ' + (v > 0 ? '+' : '') + v + 'ms가 적용됩니다.');
   });
   recordDelete.addEventListener('click', function () {
     var result = currentRecordResult();
@@ -2832,6 +2874,12 @@
     nt.vn = Math.max(0, Math.min(99, (nt.vn || 0) + d));
     save(); renderTlSyls();
   }
+  $('tlUp').addEventListener('click', function () { tlSetDir(1); });
+  $('tlDown').addEventListener('click', function () { tlSetDir(-1); });
+  $('tlDel').addEventListener('click', function () {
+    if (!tlSel) { flash('타임라인의 글자를 먼저 클릭하세요.'); return; }
+    tlDelNote();
+  });
   $('tlVibUp').addEventListener('click', function () { tlVibDelta(1); });
   $('tlVibDown').addEventListener('click', function () { tlVibDelta(-1); });
   function tlUnplace() {
