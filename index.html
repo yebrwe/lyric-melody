@@ -290,7 +290,7 @@
     flex: 1; min-width: 0;
     background: var(--paper);
     border: 1px solid var(--edge); border-radius: 8px;
-    height: 184px;
+    height: 225px;
     overflow-y: hidden;
   }
   .tl-inner { position: relative; height: 100%; cursor: grab; touch-action: pan-y; }
@@ -308,7 +308,7 @@
     background: var(--paper); color: var(--ink);
   }
   .gridlab input[type="number"]:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
-  .tl-syls { position: absolute; top: 98px; left: 0; right: 0; bottom: 0; }
+  .tl-syls { position: absolute; top: 139px; left: 0; right: 0; bottom: 0; }
   .tl-syl {
     position: absolute; bottom: 0;
     display: flex; flex-direction: column; align-items: flex-start;
@@ -494,7 +494,7 @@
       <label class="gridlab" title="녹음 파일에서 내 목소리가 MR보다 늦게 들리면 값을 키우고, 빠르면 줄이세요. 기기 지연은 자동 보정되고 이 값은 추가 미세 조정입니다">
         싱크 보정 <input type="number" id="recordSyncMs" value="0" min="-500" max="500" step="10">ms
       </label>
-      <span class="record-note" id="recordStatus">🎧 유선 이어폰 권장 · 현재 재생 위치부터 녹음합니다</span>
+      <span class="record-note" id="recordStatus">🎧 이어폰 필수 — 스피커로 들으면 MR이 마이크에 같이 녹음됩니다 · 현재 재생 위치부터 녹음</span>
       <span class="sr-only" id="recordAnnounce" role="status" aria-live="polite"></span>
       <audio id="recordPreview" controls preload="metadata" hidden></audio>
       <a class="btn" id="recordDownload" href="#" download hidden style="text-decoration:none">녹음 저장</a>
@@ -522,11 +522,12 @@
         <div class="tl-labels">
           <button id="muteOrig" class="lanebtn" style="top:22px" title="클릭해서 켜고 끄기" disabled>원곡 🔊</button>
           <button id="muteMr" class="lanebtn" style="top:64px" title="클릭해서 켜고 끄기" disabled>MR 🔊</button>
+          <button id="muteRec" class="lanebtn" style="top:106px" title="클릭해서 켜고 끄기" disabled>녹음 🔊</button>
         </div>
         <div class="tl-scroll" id="tlScroll">
           <div class="tl-inner" id="tlInner">
-            <canvas id="grid" height="182"></canvas>
-            <canvas id="wave" height="96"></canvas>
+            <canvas id="grid" height="223"></canvas>
+            <canvas id="wave" height="137"></canvas>
             <div id="tlSyls" class="tl-syls"></div>
             <div class="playhead" id="playhead"></div>
           </div>
@@ -1825,8 +1826,10 @@
   var AC = window.AudioContext || window.webkitAudioContext;
   var actx = null;
   var tracks = {
-    orig: { label: '원곡', buffer: null, name: '', on: true, src: null, gainNode: null },
-    mr: { label: 'MR', buffer: null, name: '', on: true, src: null, gainNode: null }
+    orig: { label: '원곡', buffer: null, name: '', on: true, src: null, gainNode: null, startAt: 0 },
+    mr: { label: 'MR', buffer: null, name: '', on: true, src: null, gainNode: null, startAt: 0 },
+    /* rec = 직전 녹음 결과. 클라우드에 저장하지 않고 이 화면에서만 들어보는 용도 */
+    rec: { label: '녹음', buffer: null, name: '', on: true, src: null, gainNode: null, startAt: 0 }
   };
   var audioTokens = { orig: 0, mr: 0 };
   var audioLatest = { orig: null, mr: null };
@@ -1843,9 +1846,10 @@
 
   function dur() {
     return Math.max(tracks.orig.buffer ? tracks.orig.buffer.duration : 0,
-      tracks.mr.buffer ? tracks.mr.buffer.duration : 0);
+      tracks.mr.buffer ? tracks.mr.buffer.duration : 0,
+      tracks.rec.buffer ? Math.max(0, tracks.rec.startAt) + tracks.rec.buffer.duration : 0);
   }
-  function anyLoaded() { return !!(tracks.orig.buffer || tracks.mr.buffer); }
+  function anyLoaded() { return !!(tracks.orig.buffer || tracks.mr.buffer || tracks.rec.buffer); }
   function curTime() {
     return playing ? Math.min(dur(), playOff + actx.currentTime - playT0) : playOff;
   }
@@ -1865,7 +1869,7 @@
     return { mins: mins, maxs: maxs, perSec: ab.sampleRate / per };
   }
   function stopSources() {
-    ['orig', 'mr'].forEach(function (k) {
+    ['orig', 'mr', 'rec'].forEach(function (k) {
       var tr = tracks[k];
       try { if (tr.src) tr.src.stop(); } catch (e) {}
       tr.src = null;
@@ -1873,9 +1877,11 @@
     });
   }
   function startSources() {
-    ['orig', 'mr'].forEach(function (k) {
+    ['orig', 'mr', 'rec'].forEach(function (k) {
       var tr = tracks[k];
-      if (!tr.buffer || playOff >= tr.buffer.duration) return;
+      /* rel = 트랙 내부 재생 위치. 녹음 트랙은 녹음을 시작한 지점(startAt)부터 놓인다 */
+      var rel = playOff - (tr.startAt || 0);
+      if (!tr.buffer || rel >= tr.buffer.duration) return;
       var s = actx.createBufferSource(), g = actx.createGain();
       s.buffer = tr.buffer;
       g.gain.value = tr.on ? 1 : 0;
@@ -1896,7 +1902,8 @@
         mixTail.connect(recordSession.mixBus || recordSession.mixDest);
         recordSession.mrRecordGain = recordMrGain;
       }
-      s.start(0, playOff);
+      if (rel >= 0) s.start(0, rel);
+      else s.start(actx.currentTime - rel, 0);
       tr.src = s;
       tr.gainNode = g;
     });
@@ -1954,7 +1961,7 @@
     updatePlayhead(true);
   }
   function updateTrackUI() {
-    [['orig', $('muteOrig')], ['mr', $('muteMr')]].forEach(function (pair) {
+    [['orig', $('muteOrig')], ['mr', $('muteMr')], ['rec', $('muteRec')]].forEach(function (pair) {
       var tr = tracks[pair[0]], btn = pair[1];
       btn.disabled = !tr.buffer;
       btn.classList.toggle('on', !!tr.buffer && tr.on);
@@ -1964,6 +1971,7 @@
     var names = [];
     if (tracks.orig.name) names.push('원곡: ' + tracks.orig.name);
     if (tracks.mr.name) names.push('MR: ' + tracks.mr.name);
+    if (tracks.rec.buffer) names.push('녹음: ' + fmt(tracks.rec.buffer.duration));
     audioNameEl.textContent = names.length ? names.join('  ·  ')
       : '오디오 없음';
     setPlayDisabled(!anyLoaded());
@@ -1981,6 +1989,25 @@
   }
   $('muteOrig').addEventListener('click', function () { toggleTrack('orig'); });
   $('muteMr').addEventListener('click', function () { toggleTrack('mr'); });
+  $('muteRec').addEventListener('click', function () { toggleTrack('rec'); });
+
+  /* 현재 곡의 녹음 결과를 타임라인 '녹음' 레인에 반영한다.
+     녹음 중에는 직전 녹음이 새 녹음에 섞이지 않도록 레인에서 내린다. */
+  function syncRecTrack() {
+    var result = currentRecordResult();
+    var ab = (result && !recordSession && result.audioBuffer) ? result.audioBuffer : null;
+    var startAt = ab ? (result.startAt || 0) : 0;
+    if (tracks.rec.buffer === ab && tracks.rec.startAt === startAt) return;
+    var wasOn = tracks.rec.buffer === null;
+    tracks.rec.buffer = ab;
+    tracks.rec.peaks = ab ? (result.peaks || null) : null;
+    tracks.rec.name = ab ? (result.filename || '녹음') : '';
+    tracks.rec.startAt = startAt;
+    if (wasOn && ab) tracks.rec.on = true;
+    if (tracks.rec.gainNode) tracks.rec.gainNode.gain.value = tracks.rec.on && ab ? 1 : 0;
+    updateTrackUI();
+    layoutTimeline();
+  }
 
   /* MR을 들으며 마이크를 녹음한다. 결과는 기존 원곡/MR을 덮어쓰지 않고 로컬 미리보기로만 둔다. */
   function recordingSupported() {
@@ -2023,11 +2050,14 @@
       'audio/ogg;codecs=opus',
       'audio/webm'
     ];
-    if (!MediaRecorder.isTypeSupported) return {};
+    /* 브라우저 기본 비트레이트(보통 128kbps 이하)는 노래 녹음에 부족해 명시한다 */
+    if (!MediaRecorder.isTypeSupported) return { audioBitsPerSecond: 256000 };
     for (var i = 0; i < types.length; i++) {
-      if (MediaRecorder.isTypeSupported(types[i])) return { mimeType: types[i] };
+      if (MediaRecorder.isTypeSupported(types[i])) {
+        return { mimeType: types[i], audioBitsPerSecond: 256000 };
+      }
     }
-    return {};
+    return { audioBitsPerSecond: 256000 };
   }
   function recordingExt(mime) {
     mime = String(mime || '').toLowerCase();
@@ -2100,6 +2130,7 @@
     var result = currentRecordResult();
     var lastError = recordErrors[currentRecordingOwnerKey()] || '';
     syncRecordingPreview(result);
+    syncRecTrack();
     recordBtn.classList.toggle('recording', active);
     recordBtn.setAttribute('aria-pressed', active ? 'true' : 'false');
     recordBtn.textContent = active ? '■ 녹음 종료' :
@@ -2111,6 +2142,7 @@
     $('homeBtn').disabled = busy || !anyLoaded();
     $('muteOrig').disabled = busy || !tracks.orig.buffer;
     $('muteMr').disabled = busy || !tracks.mr.buffer;
+    $('muteRec').disabled = busy || !tracks.rec.buffer;
     setPlayDisabled(busy || !anyLoaded());
     tapBtn.disabled = !anyLoaded();
     recordPreview.hidden = recordDownload.hidden = recordDelete.hidden = !result || busy;
@@ -2128,7 +2160,7 @@
         fmt(result.seconds) + ' · ' + (result.includeMr ? 'MR+목소리' : '목소리만') +
         (result.saved ? ' · 기기에 저장됨' : ' · 기기에 저장하려면 [녹음 저장]');
     } else {
-      recordStatus.textContent = '🎧 유선 이어폰 권장 · 현재 재생 위치부터 녹음합니다';
+      recordStatus.textContent = '🎧 이어폰 필수 — 스피커로 들으면 MR이 마이크에 같이 녹음됩니다 · 현재 재생 위치부터 녹음';
     }
   }
   function pauseTimelinePlayback() {
@@ -2189,7 +2221,7 @@
     if (previousResult && previousResult.url) URL.revokeObjectURL(previousResult.url);
     var objectUrl = URL.createObjectURL(blob);
     var filename = recordingFilename(mime);
-    recordResults[session.ownerKey] = {
+    var result = {
       blob: blob,
       seconds: Math.max(0, session.elapsed || 0),
       includeMr: session.includeMr,
@@ -2197,8 +2229,21 @@
       notice: session.notice || '',
       saved: false,
       ownerKey: session.ownerKey,
-      url: objectUrl
+      url: objectUrl,
+      /* 타임라인에서의 시작 위치 — 싱크 보정으로 늦춘 만큼 앞으로 당겨 배치 */
+      startAt: (session.startOffset || 0) - (session.syncDelay || 0),
+      audioBuffer: null,
+      peaks: null
     };
+    recordResults[session.ownerKey] = result;
+    actx = actx || new AC();
+    blob.arrayBuffer().then(function (buf) { return actx.decodeAudioData(buf); })
+      .then(function (ab) {
+        if (recordResults[result.ownerKey] !== result) return;
+        result.audioBuffer = ab;
+        result.peaks = buildPeaks(ab);
+        updateRecordUI();
+      }).catch(function () {});
     delete recordErrors[session.ownerKey];
     announceRecording(session.ownerKey, session.notice || '녹음이 완료되었습니다.');
     updateRecordUI();
@@ -2275,8 +2320,10 @@
 
     Promise.resolve().then(function () { return ensureAudioRunning(); }).then(function () {
       if (recordSession !== session || session.cancelled) return null;
+      /* 통화용 음성 처리(에코 제거·노이즈 억제·자동 게인)는 노래를 뭉개므로 끈다.
+         대신 스피커 재생분이 마이크에 섞이니 이어폰 사용이 필수다. */
       return navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+        audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
       });
     }).then(function (stream) {
       if (!stream) return null;
@@ -2302,8 +2349,8 @@
     }).then(function (stream) {
       if (!stream || recordSession !== session || session.cancelled) return;
       var recorderStream = stream;
+      session.syncDelay = recordingSyncDelay(stream);
       if (session.includeMr) {
-        session.syncDelay = recordingSyncDelay(stream);
         session.mixDest = actx.createMediaStreamDestination();
         session.mixBus = actx.createDynamicsCompressor();
         session.mixBus.threshold.value = -6;
@@ -2486,7 +2533,7 @@
     waveCv.style.width = w + 'px';
     tlInner.style.width = w + 'px';
     var ctx = waveCv.getContext('2d');
-    ctx.clearRect(0, 0, w, 96);
+    ctx.clearRect(0, 0, w, 137);
     var ink = cssVar('--muted') || '#888';
     var acc = cssVar('--accent') || '#5580dd';
     ctx.fillStyle = ink;
@@ -2499,18 +2546,20 @@
     ctx.globalAlpha = 0.15;
     ctx.fillStyle = ink;
     ctx.fillRect(0, 53, w, 1);
-    /* 두 레인: 위 = 원곡, 아래 = MR (꺼진 트랙은 흐리게) */
-    [['orig', 33, ink], ['mr', 74, acc]].forEach(function (lane) {
+    ctx.fillRect(0, 94, w, 1);
+    /* 세 레인: 원곡 / MR / 녹음 (꺼진 트랙은 흐리게) */
+    [['orig', 33, ink], ['mr', 74, acc], ['rec', 115, '#C65850']].forEach(function (lane) {
       var tr = tracks[lane[0]];
       if (!tr.peaks) return;
-      var mid = lane[1], half = 19;
+      var mid = lane[1], half = 19, startAt = tr.startAt || 0;
       ctx.fillStyle = lane[2];
       ctx.globalAlpha = tr.on ? 0.75 : 0.22;
       for (var x2 = 0; x2 < w; x2++) {
-        var b0 = Math.floor(x2 / pps * tr.peaks.perSec);
-        var b1 = Math.max(b0 + 1, Math.floor((x2 + 1) / pps * tr.peaks.perSec));
+        var b0 = Math.floor((x2 / pps - startAt) * tr.peaks.perSec);
+        var b1 = Math.max(b0 + 1, Math.floor(((x2 + 1) / pps - startAt) * tr.peaks.perSec));
+        if (b1 <= 0) continue;
         var lo2 = 1, hi2 = -1;
-        for (var b = b0; b < b1 && b < tr.peaks.mins.length; b++) {
+        for (var b = Math.max(0, b0); b < b1 && b < tr.peaks.mins.length; b++) {
           if (tr.peaks.mins[b] < lo2) lo2 = tr.peaks.mins[b];
           if (tr.peaks.maxs[b] > hi2) hi2 = tr.peaks.maxs[b];
         }
@@ -2556,7 +2605,7 @@
     g.style.width = (w || 1) + 'px';
     if (!duration || !st) return;
     var ctx = g.getContext('2d');
-    ctx.clearRect(0, 0, w, 182);
+    ctx.clearRect(0, 0, w, 223);
     ctx.strokeStyle = cssVar('--muted') || '#888';
     ctx.lineWidth = 1;
     var off = +doc.gridOff || 0;
@@ -2572,7 +2621,7 @@
       var x = Math.round(t * pps) + 0.5;
       ctx.beginPath();
       ctx.moveTo(x, 0);
-      ctx.lineTo(x, 182);
+      ctx.lineTo(x, 223);
       ctx.stroke();
     }
     ctx.setLineDash([]);
@@ -4310,6 +4359,11 @@
       tracks[k].peaks = null;
       tracks[k].on = true;
     });
+    tracks.rec.buffer = null;
+    tracks.rec.peaks = null;
+    tracks.rec.name = '';
+    tracks.rec.startAt = 0;
+    tracks.rec.on = true;
     updateTrackUI();
     updateRecordUI();
     waveCv.width = 1;
