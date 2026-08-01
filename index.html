@@ -474,7 +474,7 @@
       <label class="gridlab" title="켜면 MR과 목소리가 한 파일로 저장되고, 끄면 목소리만 저장됩니다">
         <input type="checkbox" id="recordMix" checked> 녹음 파일에 MR 포함
       </label>
-      <span class="record-note" id="recordStatus">🎧 유선 이어폰 권장 · 현재 재생 위치부터 녹음합니다</span>
+      <span class="record-note" id="recordStatus">🎙 음악용 원음 모드 · 현재 재생 위치부터 녹음합니다</span>
       <span class="sr-only" id="recordAnnounce" role="status" aria-live="polite"></span>
       <audio id="recordPreview" controls preload="metadata" hidden></audio>
       <a class="btn" id="recordDownload" href="#" download hidden style="text-decoration:none">녹음 저장</a>
@@ -1801,6 +1801,7 @@
   var playing = false, playStarting = false, playRequest = 0, playOff = 0, playT0 = 0;
   var recordSession = null, recordResults = {}, recordErrors = {};
   var MAX_RECORD_SECONDS = 30 * 60, MAX_RECORD_BYTES = 150 * 1024 * 1024;
+  var RECORD_AUDIO_BITS_PER_SECOND = 256000, RECORD_MR_GAIN = 0.5;
 
   function dur() {
     return Math.max(tracks.orig.buffer ? tracks.orig.buffer.duration : 0,
@@ -1845,7 +1846,8 @@
       if (k === 'mr' && recordSession && recordSession.phase === 'recording' &&
           recordSession.includeMr && recordSession.mixDest) {
         var recordMrGain = actx.createGain();
-        recordMrGain.gain.value = 0.72;
+        /* 마스터링된 MR에 헤드룸을 확보해 보컬과 합칠 때 리미터가 계속 눌리지 않게 한다. */
+        recordMrGain.gain.value = RECORD_MR_GAIN;
         g.connect(recordMrGain);
         recordMrGain.connect(recordSession.mixBus || recordSession.mixDest);
         recordSession.mrRecordGain = recordMrGain;
@@ -1957,11 +1959,73 @@
       'audio/ogg;codecs=opus',
       'audio/webm'
     ];
-    if (!MediaRecorder.isTypeSupported) return {};
+    var options = { audioBitsPerSecond: RECORD_AUDIO_BITS_PER_SECOND };
+    if (!MediaRecorder.isTypeSupported) return options;
     for (var i = 0; i < types.length; i++) {
-      if (MediaRecorder.isTypeSupported(types[i])) return { mimeType: types[i] };
+      if (MediaRecorder.isTypeSupported(types[i])) {
+        options.mimeType = types[i];
+        return options;
+      }
     }
-    return {};
+    return options;
+  }
+  function createAudioRecorder(stream) {
+    var preferred = recordingOptions();
+    try {
+      return new MediaRecorder(stream, preferred);
+    } catch (preferredError) {
+      /* 일부 구형 브라우저는 bitrate 옵션을 구현하지 않았으므로 녹음 자체는 폴백한다. */
+      if (preferred.mimeType) {
+        try { return new MediaRecorder(stream, { mimeType: preferred.mimeType }); } catch (mimeError) {}
+      }
+      return new MediaRecorder(stream);
+    }
+  }
+  function musicCaptureConstraints() {
+    return {
+      audio: {
+        /* 노래의 배음과 다이내믹을 보존하고 통화용 DSP의 게이팅·펌핑을 피한다. */
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false,
+        sampleRate: { ideal: 48000 }
+      }
+    };
+  }
+  function prepareMusicTrack(session, stream) {
+    var track = stream && stream.getAudioTracks ? stream.getAudioTracks()[0] : null;
+    if (!track) return;
+    session.micTrack = track;
+    try { if ('contentHint' in track) track.contentHint = 'music'; } catch (e) {}
+    try { if (track.getSettings) session.captureSettings = track.getSettings(); } catch (e) {}
+  }
+  function prepareRecorderTrack(session, stream) {
+    var track = stream && stream.getAudioTracks ? stream.getAudioTracks()[0] : null;
+    if (!track) return;
+    session.recorderTrack = track;
+    try { if ('contentHint' in track) track.contentHint = 'music'; } catch (e) {}
+    try { if (track.getSettings) session.outputSettings = track.getSettings(); } catch (e) {}
+  }
+  function snapshotRecordingQuality(session) {
+    var micTrack = session && (session.micTrack ||
+      (session.micStream && session.micStream.getAudioTracks && session.micStream.getAudioTracks()[0]));
+    var recorderTrack = session && (session.recorderTrack || micTrack);
+    try { if (micTrack && micTrack.getSettings) session.captureSettings = micTrack.getSettings(); } catch (e) {}
+    try { if (recorderTrack && recorderTrack.getSettings) session.outputSettings = recorderTrack.getSettings(); } catch (e) {}
+    var capture = session.captureSettings || {}, output = session.outputSettings || capture, parts = [];
+    var sampleRate = output.sampleRate || (session.includeMr && actx && actx.sampleRate) || capture.sampleRate;
+    if (sampleRate) parts.push((sampleRate / 1000).toFixed(
+      sampleRate % 1000 ? 1 : 0) + ' kHz');
+    var channelCount = output.channelCount || capture.channelCount;
+    if (channelCount) parts.push(channelCount === 1 ? '모노' : channelCount + '채널');
+    var bitrate = session.recorder && session.recorder.audioBitsPerSecond;
+    if (bitrate) parts.push(Math.round(bitrate / 1000) + ' kbps 목표');
+    var processing = [];
+    if (capture.echoCancellation === true) processing.push('AEC');
+    if (capture.noiseSuppression === true) processing.push('노이즈 억제');
+    if (capture.autoGainControl === true) processing.push('자동 게인');
+    if (processing.length) parts.push(processing.join('/') + ' 켜짐');
+    session.qualitySummary = parts.join(' · ');
   }
   function recordingExt(mime) {
     mime = String(mime || '').toLowerCase();
@@ -2060,9 +2124,10 @@
     } else if (result) {
       recordStatus.textContent = (result.notice ? result.notice + ' · ' : '녹음 완료 ') +
         fmt(result.seconds) + ' · ' + (result.includeMr ? 'MR+목소리' : '목소리만') +
+        (result.qualitySummary ? ' · ' + result.qualitySummary : '') +
         (result.saved ? ' · 기기에 저장됨' : ' · 기기에 저장하려면 [녹음 저장]');
     } else {
-      recordStatus.textContent = '🎧 유선 이어폰 권장 · 현재 재생 위치부터 녹음합니다';
+      recordStatus.textContent = '🎙 음악용 원음 모드 · 현재 재생 위치부터 녹음합니다';
     }
   }
   function pauseTimelinePlayback() {
@@ -2096,6 +2161,7 @@
   function finalizeRecording(session) {
     if (!session || session.finalized) return;
     session.finalized = true;
+    snapshotRecordingQuality(session);
     releaseRecordingResources(session);
     restoreRecordingTracks(session);
     if (recordSession === session) recordSession = null;
@@ -2129,6 +2195,7 @@
       includeMr: session.includeMr,
       filename: filename,
       notice: session.notice || '',
+      qualitySummary: session.qualitySummary || '',
       saved: false,
       ownerKey: session.ownerKey,
       url: objectUrl
@@ -2209,9 +2276,7 @@
 
     Promise.resolve().then(function () { return ensureAudioRunning(); }).then(function () {
       if (recordSession !== session || session.cancelled) return null;
-      return navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
-      });
+      return navigator.mediaDevices.getUserMedia(musicCaptureConstraints());
     }).then(function (stream) {
       if (!stream) return null;
       if (recordSession !== session || session.cancelled) {
@@ -2219,6 +2284,7 @@
         return null;
       }
       session.micStream = stream;
+      prepareMusicTrack(session, stream);
       stream.getAudioTracks().forEach(function (track) {
         track.addEventListener('ended', function () {
           if (recordSession !== session) return;
@@ -2238,18 +2304,20 @@
       var recorderStream = stream;
       if (session.includeMr) {
         session.mixDest = actx.createMediaStreamDestination();
+        /* 합산 피크만 잡는 안전 리미터. 이전 설정은 MR 전체를 지속적으로 압축했다. */
         session.mixBus = actx.createDynamicsCompressor();
-        session.mixBus.threshold.value = -6;
-        session.mixBus.knee.value = 12;
-        session.mixBus.ratio.value = 4;
-        session.mixBus.attack.value = 0.003;
-        session.mixBus.release.value = 0.25;
+        session.mixBus.threshold.value = -1;
+        session.mixBus.knee.value = 0;
+        session.mixBus.ratio.value = 20;
+        session.mixBus.attack.value = 0.001;
+        session.mixBus.release.value = 0.08;
         session.mixBus.connect(session.mixDest);
         session.micSource = actx.createMediaStreamSource(stream);
         session.micSource.connect(session.mixBus);
         recorderStream = session.mixDest.stream;
       }
-      session.recorder = new MediaRecorder(recorderStream, recordingOptions());
+      prepareRecorderTrack(session, recorderStream);
+      session.recorder = createAudioRecorder(recorderStream);
       session.recorder.ondataavailable = function (e) {
         if (!e.data || !e.data.size) return;
         session.chunks.push(e.data);
